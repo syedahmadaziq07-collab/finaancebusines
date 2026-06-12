@@ -30,6 +30,13 @@ export default function Budgets({
   const [editUsed, setEditUsed] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
 
+  // Top-up state
+  const [showTopUpForm, setShowTopUpForm] = useState(false);
+  const [topUpBudgetId, setTopUpBudgetId] = useState("");
+  const [topUpAmount, setTopUpAmount] = useState("");
+  const [topUpNote, setTopUpNote] = useState("");
+  const [isTopUpSubmitting, setIsTopUpSubmitting] = useState(false);
+
   if (isLoading) {
     return (
       <div className="bg-brand-card border border-brand-border rounded-2xl p-6 h-[400px] flex flex-col justify-between animate-pulse">
@@ -107,6 +114,29 @@ export default function Budgets({
       } catch (err) {
         console.error(err);
       }
+    }
+  };
+
+  const handleTopUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!topUpBudgetId || !topUpAmount) return;
+
+    setIsTopUpSubmitting(true);
+    try {
+      const budget = budgets.find(b => b.id === topUpBudgetId);
+      if (!budget) return;
+      const addAmount = parseFloat(topUpAmount);
+      await onUpdateBudget(topUpBudgetId, {
+        used: budget.used + addAmount
+      });
+      setShowTopUpForm(false);
+      setTopUpBudgetId("");
+      setTopUpAmount("");
+      setTopUpNote("");
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsTopUpSubmitting(false);
     }
   };
 
@@ -191,15 +221,31 @@ export default function Budgets({
         )}
       </div>
 
-      {/* Add New Budget Trigger Element at bottom */}
-      <button 
-        id="btn-add-budget-trigger"
-        onClick={() => setShowForm(true)}
-        className="w-full mt-6 bg-neutral-900/60 hover:bg-neutral-900 border border-brand-border hover:border-neutral-700 py-2.5 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center justify-center gap-1.5 shrink-0 active:scale-[0.99] cursor-pointer"
-      >
-        <Plus size={14} />
-        <span>Add Budget</span>
-      </button>
+      {/* Add New Budget & Add Value Trigger Elements at bottom */}
+      <div className="mt-6 flex items-center gap-2.5 shrink-0">
+        <button 
+          id="btn-add-budget-trigger"
+          onClick={() => setShowForm(true)}
+          className="flex-1 bg-neutral-900/60 hover:bg-neutral-900 border border-brand-border hover:border-neutral-700 py-2.5 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center justify-center gap-1.5 active:scale-[0.99] cursor-pointer"
+        >
+          <Plus size={14} />
+          <span>Add Budget</span>
+        </button>
+        <button
+          id="btn-budget-top-up"
+          onClick={() => {
+            setTopUpBudgetId(budgets.length > 0 ? budgets[0].id : "");
+            setTopUpAmount("");
+            setTopUpNote("");
+            setShowTopUpForm(true);
+          }}
+          disabled={budgets.length === 0}
+          className="flex-1 border border-brand-border hover:border-neutral-700 text-xs text-brand-muted hover:text-white py-2.5 rounded-xl transition-all font-semibold flex items-center justify-center gap-1.5 active:scale-[0.99] select-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Plus size={14} />
+          <span>Add Value</span>
+        </button>
+      </div>
 
       {/* LIGHT OVERLAY FORM - ADD */}
       {showForm && (
@@ -276,6 +322,90 @@ export default function Budgets({
                 >
                   <Plus size={14} />
                   <span>{isSubmitting ? "Saving..." : "Add"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* LIGHT OVERLAY FORM - TOP-UP / ADD VALUE */}
+      {showTopUpForm && (
+        <div id="budget-top-up-modal" className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#121212] border border-brand-border rounded-2xl max-w-sm w-full p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-250">
+            <button 
+              onClick={() => setShowTopUpForm(false)}
+              className="absolute top-4 right-4 text-brand-muted hover:text-white p-1 rounded-xl hover:bg-neutral-900 transition-colors"
+            >
+              <X size={16} />
+            </button>
+
+            <header className="mb-5">
+              <h4 className="font-display font-semibold text-lg text-white">Add Value to Budget</h4>
+              <p className="text-xs text-brand-muted mt-0.5">Increase used amount for an existing category</p>
+            </header>
+
+            <form onSubmit={handleTopUp} className="space-y-4">
+              {/* Select existing budget */}
+              <div>
+                <label className="text-[10px] text-brand-muted font-mono uppercase block mb-1">Select Category</label>
+                <select
+                  required
+                  value={topUpBudgetId}
+                  onChange={(e) => setTopUpBudgetId(e.target.value)}
+                  className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm text-white transition-colors cursor-pointer"
+                >
+                  {budgets.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} — RM {b.used.toLocaleString()} / RM {b.total.toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Amount to add */}
+              <div>
+                <label className="text-[10px] text-brand-muted font-mono uppercase block mb-1">Amount to Add (RM)</label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  step="0.01"
+                  placeholder="e.g. 20"
+                  value={topUpAmount}
+                  onChange={(e) => setTopUpAmount(e.target.value)}
+                  className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm font-mono text-white transition-colors"
+                />
+              </div>
+
+              {/* Optional note */}
+              <div>
+                <label className="text-[10px] text-brand-muted font-mono uppercase block mb-1">Note (optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Lunch, Extra spending"
+                  value={topUpNote}
+                  onChange={(e) => setTopUpNote(e.target.value)}
+                  className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm text-white transition-colors"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTopUpForm(false)}
+                  className="flex-1 border border-brand-border hover:border-neutral-800 text-xs text-brand-muted hover:text-white py-2.5 rounded-xl transition-colors font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isTopUpSubmitting}
+                  className="flex-1 bg-white hover:bg-neutral-200 text-black text-xs font-semibold py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  <Plus size={14} />
+                  <span>{isTopUpSubmitting ? "Adding..." : "Add Value"}</span>
                 </button>
               </div>
             </form>
