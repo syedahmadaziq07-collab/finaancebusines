@@ -1,17 +1,89 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Transaction, Budget, StockInfo, Goal, Account } from "./types";
 
-// Read environment variables safely
-const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || "";
-const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "";
+// ==========================================
+// RUNTIME SUPABASE CONFIG
+// Priority: localStorage runtime > VITE env vars
+// ==========================================
 
-// Determine whether Supabase integration details are provided
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+let _supabaseClient: SupabaseClient | null = null;
 
-// Initialize client if configured
-export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null;
+const envUrl = (import.meta as any).env.VITE_SUPABASE_URL || "";
+const envAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "";
+
+function getRuntimeConfig(): { url: string; anonKey: string } {
+  try {
+    return {
+      url: localStorage.getItem("finance_supabase_url") || "",
+      anonKey: localStorage.getItem("finance_supabase_anon_key") || "",
+    };
+  } catch {
+    return { url: "", anonKey: "" };
+  }
+}
+
+function resolveConfig(): { url: string; anonKey: string } {
+  const rt = getRuntimeConfig();
+  if (rt.url && rt.anonKey) return rt;
+  return { url: envUrl, anonKey: envAnonKey };
+}
+
+export function isSupabaseConfigured(): boolean {
+  const { url, anonKey } = resolveConfig();
+  return Boolean(url && anonKey);
+}
+
+export function getSupabaseClient(): SupabaseClient | null {
+  if (_supabaseClient) return _supabaseClient;
+  const { url, anonKey } = resolveConfig();
+  if (url && anonKey) {
+    _supabaseClient = createClient(url, anonKey);
+    return _supabaseClient;
+  }
+  return null;
+}
+
+export function reinitializeSupabaseClient(): void {
+  _supabaseClient = null;
+}
+
+export function getSupabaseConfig(): { url: string; anonKey: string; source: string } {
+  const rt = getRuntimeConfig();
+  if (rt.url && rt.anonKey) return { ...rt, source: "localStorage" };
+  if (envUrl && envAnonKey) return { url: envUrl, anonKey: envAnonKey, source: "env" };
+  return { url: "", anonKey: "", source: "none" };
+}
+
+export function saveSupabaseConfig(url: string, anonKey: string): void {
+  localStorage.setItem("finance_supabase_url", url);
+  localStorage.setItem("finance_supabase_anon_key", anonKey);
+  reinitializeSupabaseClient();
+}
+
+export function clearSupabaseConfig(): void {
+  localStorage.removeItem("finance_supabase_url");
+  localStorage.removeItem("finance_supabase_anon_key");
+  reinitializeSupabaseClient();
+}
+
+export async function testSupabaseConnection(): Promise<{ ok: boolean; message: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { ok: false, message: "Invalid Supabase URL or anon key." };
+  }
+  try {
+    const { error } = await client.from("transactions").select("id", { count: "exact", head: true }).limit(1);
+    if (error) {
+      if (error.code === "42P01") {
+        return { ok: true, message: "Supabase connected, but tables are missing. Run the SQL setup." };
+      }
+      return { ok: false, message: "Invalid Supabase URL or anon key." };
+    }
+    return { ok: true, message: "Connected" };
+  } catch {
+    return { ok: false, message: "Invalid Supabase URL or anon key." };
+  }
+}
 
 // ==========================================
 // SQL Schema Setup Helper (for display)
@@ -77,10 +149,10 @@ create policy "Allow all on accounts" on accounts for all using (true) with chec
 // TRANSACTIONS CRUD
 // ==========================================
 export async function getDbTransactions(): Promise<Transaction[]> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     return JSON.parse(localStorage.getItem("finance_transactions") || "[]");
   }
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("transactions")
     .select("*")
     .order("date", { ascending: false });
@@ -110,7 +182,7 @@ export async function addDbTransaction(tx: Omit<Transaction, "id" | "date"> & { 
     type: isExpense ? "expense" : "income"
   };
 
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_transactions") || "[]");
     const newTx: Transaction = {
       id: "tx-" + Date.now(),
@@ -124,7 +196,7 @@ export async function addDbTransaction(tx: Omit<Transaction, "id" | "date"> & { 
     return newTx;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("transactions")
     .insert([dbRow])
     .select()
@@ -145,7 +217,7 @@ export async function addDbTransaction(tx: Omit<Transaction, "id" | "date"> & { 
 }
 
 export async function updateDbTransaction(id: string, tx: Partial<Transaction>): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_transactions") || "[]") as Transaction[];
     const idx = local.findIndex(t => t.id === id);
     if (idx > -1) {
@@ -167,7 +239,7 @@ export async function updateDbTransaction(id: string, tx: Partial<Transaction>):
     updates.type = tx.amount < 0 ? "expense" : "income";
   }
 
-  const { error } = await supabase
+  const { error } = await client
     .from("transactions")
     .update(updates)
     .eq("id", id);
@@ -176,14 +248,14 @@ export async function updateDbTransaction(id: string, tx: Partial<Transaction>):
 }
 
 export async function deleteDbTransaction(id: string): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_transactions") || "[]") as Transaction[];
     const filtered = local.filter(t => t.id !== id);
     localStorage.setItem("finance_transactions", JSON.stringify(filtered));
     return;
   }
 
-  const { error } = await supabase
+  const { error } = await client
     .from("transactions")
     .delete()
     .eq("id", id);
@@ -195,10 +267,10 @@ export async function deleteDbTransaction(id: string): Promise<void> {
 // BUDGETS CRUD
 // ==========================================
 export async function getDbBudgets(): Promise<Budget[]> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     return JSON.parse(localStorage.getItem("finance_budgets") || "[]");
   }
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("budgets")
     .select("*");
 
@@ -222,7 +294,7 @@ export async function addDbBudget(budget: { name: string; total: number; used?: 
     used: budget.used || 0
   };
 
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_budgets") || "[]") as Budget[];
     const existing = local.find(b => b.name.toLowerCase() === budget.name.toLowerCase());
     if (existing) {
@@ -241,7 +313,7 @@ export async function addDbBudget(budget: { name: string; total: number; used?: 
     return newBudget;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("budgets")
     .insert([dbRow])
     .select()
@@ -250,7 +322,7 @@ export async function addDbBudget(budget: { name: string; total: number; used?: 
   if (error) {
     // Handling duplicate category gracefully by updating total
     if (error.code === "23505") { // Unique restriction code
-      const { data: updated, error: updateErr } = await supabase
+      const { data: updated, error: updateErr } = await client
         .from("budgets")
         .update({ total: budget.total })
         .eq("category", budget.name)
@@ -276,7 +348,7 @@ export async function addDbBudget(budget: { name: string; total: number; used?: 
 }
 
 export async function updateDbBudget(id: string, budget: Partial<Budget>): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_budgets") || "[]") as Budget[];
     const idx = local.findIndex(b => b.id === id);
     if (idx > -1) {
@@ -293,7 +365,7 @@ export async function updateDbBudget(id: string, budget: Partial<Budget>): Promi
   if (budget.total !== undefined) updates.total = budget.total;
   if (budget.used !== undefined) updates.used = budget.used;
 
-  const { error } = await supabase
+  const { error } = await client
     .from("budgets")
     .update(updates)
     .eq("id", id);
@@ -302,14 +374,14 @@ export async function updateDbBudget(id: string, budget: Partial<Budget>): Promi
 }
 
 export async function deleteDbBudget(id: string): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_budgets") || "[]") as Budget[];
     const filtered = local.filter(b => b.id !== id);
     localStorage.setItem("finance_budgets", JSON.stringify(filtered));
     return;
   }
 
-  const { error } = await supabase
+  const { error } = await client
     .from("budgets")
     .delete()
     .eq("id", id);
@@ -321,11 +393,11 @@ export async function deleteDbBudget(id: string): Promise<void> {
 // PORTFOLIO CRUD
 // ==========================================
 export async function getDbPortfolioHoldings(): Promise<StockInfo[]> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_portfolio") || "null");
     return local?.stocks || [];
   }
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("portfolio_holdings")
     .select("*");
 
@@ -351,7 +423,7 @@ export async function addDbPortfolioHolding(stock: { ticker: string; company: st
     change_percent: stock.change !== undefined ? stock.change : 2.5
   };
 
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const localData = JSON.parse(localStorage.getItem("finance_portfolio") || '{"total":0,"pnl":0,"ytdPercent":0,"stocks":[]}') as any;
     const existingIdx = localData.stocks.findIndex((s: any) => s.ticker === stock.ticker.toUpperCase());
     
@@ -372,7 +444,7 @@ export async function addDbPortfolioHolding(stock: { ticker: string; company: st
     return localData.stocks.find((s: any) => s.ticker === stock.ticker.toUpperCase())!;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("portfolio_holdings")
     .insert([dbRow])
     .select()
@@ -380,13 +452,13 @@ export async function addDbPortfolioHolding(stock: { ticker: string; company: st
 
   if (error) {
     if (error.code === "23505") { // Duplicate ticker
-      const { data: existing } = await supabase
+      const { data: existing } = await client
         .from("portfolio_holdings")
         .select("*")
         .eq("ticker", stock.ticker.toUpperCase())
         .single();
       const nextVal = Number(existing.value) + stock.amount;
-      const { data: updated, error: updateErr } = await supabase
+      const { data: updated, error: updateErr } = await client
         .from("portfolio_holdings")
         .update({ value: nextVal })
         .eq("ticker", stock.ticker.toUpperCase())
@@ -414,7 +486,7 @@ export async function addDbPortfolioHolding(stock: { ticker: string; company: st
 }
 
 export async function updateDbPortfolioHolding(id: string, stock: Partial<StockInfo>): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const localData = JSON.parse(localStorage.getItem("finance_portfolio") || '{"total":0,"pnl":0,"ytdPercent":0,"stocks":[]}') as any;
     const idx = localData.stocks.findIndex((s: any) => s.id === id || s.ticker === stock.ticker);
     if (idx > -1) {
@@ -437,7 +509,7 @@ export async function updateDbPortfolioHolding(id: string, stock: Partial<StockI
   if (stock.value !== undefined) updates.value = stock.value;
   if (stock.change !== undefined) updates.change_percent = stock.change;
 
-  const { error } = await supabase
+  const { error } = await client
     .from("portfolio_holdings")
     .update(updates)
     .eq("id", id);
@@ -446,7 +518,7 @@ export async function updateDbPortfolioHolding(id: string, stock: Partial<StockI
 }
 
 export async function deleteDbPortfolioHolding(id: string): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const localData = JSON.parse(localStorage.getItem("finance_portfolio") || '{"total":0,"pnl":0,"ytdPercent":0,"stocks":[]}') as any;
     const removedStock = localData.stocks.find((s: any) => s.id === id);
     if (removedStock) {
@@ -457,7 +529,7 @@ export async function deleteDbPortfolioHolding(id: string): Promise<void> {
     return;
   }
 
-  const { error } = await supabase
+  const { error } = await client
     .from("portfolio_holdings")
     .delete()
     .eq("id", id);
@@ -469,10 +541,10 @@ export async function deleteDbPortfolioHolding(id: string): Promise<void> {
 // GOALS CRUD
 // ==========================================
 export async function getDbGoals(): Promise<Goal[]> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     return JSON.parse(localStorage.getItem("finance_goals") || "[]");
   }
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("goals")
     .select("*");
 
@@ -504,7 +576,7 @@ export async function addDbGoal(goal: { name: string; current: number; target: n
     target: goal.target
   };
 
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_goals") || "[]") as Goal[];
     const remaining = Math.max(0, goal.target - goal.current);
     const newGoal: Goal = {
@@ -520,7 +592,7 @@ export async function addDbGoal(goal: { name: string; current: number; target: n
     return newGoal;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("goals")
     .insert([dbRow])
     .select()
@@ -528,7 +600,7 @@ export async function addDbGoal(goal: { name: string; current: number; target: n
 
   if (error) {
     if (error.code === "23505") { // duplicate name
-      const { data: updated, error: updateErr } = await supabase
+      const { data: updated, error: updateErr } = await client
         .from("goals")
         .update({ target: goal.target, current: goal.current })
         .eq("name", goal.name.toUpperCase())
@@ -564,7 +636,7 @@ export async function addDbGoal(goal: { name: string; current: number; target: n
 }
 
 export async function updateDbGoal(id: string, goal: Partial<Goal>): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_goals") || "[]") as Goal[];
     const idx = local.findIndex(g => g.id === id);
     if (idx > -1) {
@@ -586,7 +658,7 @@ export async function updateDbGoal(id: string, goal: Partial<Goal>): Promise<voi
   if (goal.current !== undefined) updates.current = goal.current;
   if (goal.target !== undefined) updates.target = goal.target;
 
-  const { error } = await supabase
+  const { error } = await client
     .from("goals")
     .update(updates)
     .eq("id", id);
@@ -595,14 +667,14 @@ export async function updateDbGoal(id: string, goal: Partial<Goal>): Promise<voi
 }
 
 export async function deleteDbGoal(id: string): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_goals") || "[]") as Goal[];
     const filtered = local.filter(g => g.id !== id);
     localStorage.setItem("finance_goals", JSON.stringify(filtered));
     return;
   }
 
-  const { error } = await supabase
+  const { error } = await client
     .from("goals")
     .delete()
     .eq("id", id);
@@ -614,10 +686,10 @@ export async function deleteDbGoal(id: string): Promise<void> {
 // ACCOUNTS CRUD
 // ==========================================
 export async function getDbAccounts(): Promise<Account[]> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     return JSON.parse(localStorage.getItem("finance_accounts") || "[]");
   }
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("accounts")
     .select("*")
     .order("created_at", { ascending: false });
@@ -647,7 +719,7 @@ export async function addDbAccount(account: Omit<Account, "id" | "created_at">):
     balance: account.balance
   };
 
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_accounts") || "[]") as Account[];
     const newAccount: Account = {
       id: "a-" + Date.now(),
@@ -658,7 +730,7 @@ export async function addDbAccount(account: Omit<Account, "id" | "created_at">):
     return newAccount;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("accounts")
     .insert([dbRow])
     .select()
@@ -681,7 +753,7 @@ export async function addDbAccount(account: Omit<Account, "id" | "created_at">):
 }
 
 export async function updateDbAccount(id: string, account: Partial<Account>): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_accounts") || "[]") as Account[];
     const idx = local.findIndex(a => a.id === id);
     if (idx > -1) {
@@ -702,7 +774,7 @@ export async function updateDbAccount(id: string, account: Partial<Account>): Pr
   if (account.last_four !== undefined) updates.last_four = account.last_four;
   if (account.balance !== undefined) updates.balance = account.balance;
 
-  const { error } = await supabase
+  const { error } = await client
     .from("accounts")
     .update(updates)
     .eq("id", id);
@@ -711,14 +783,14 @@ export async function updateDbAccount(id: string, account: Partial<Account>): Pr
 }
 
 export async function deleteDbAccount(id: string): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_accounts") || "[]") as Account[];
     const filtered = local.filter(a => a.id !== id);
     localStorage.setItem("finance_accounts", JSON.stringify(filtered));
     return;
   }
 
-  const { error } = await supabase
+  const { error } = await client
     .from("accounts")
     .delete()
     .eq("id", id);
@@ -733,8 +805,8 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
   let synced = 0;
   const errors: string[] = [];
 
-  if (!isSupabaseConfigured || !supabase) {
-    errors.push("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY first.");
+  const client = getSupabaseClient(); if (!client) {
+    errors.push("Supabase is not configured. Set credentials in Settings page to enable cloud sync.");
     return { synced, errors };
   }
 
@@ -743,7 +815,7 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
     const localTxs: Transaction[] = JSON.parse(localStorage.getItem("finance_transactions") || "[]");
     for (const tx of localTxs) {
       const isExpense = tx.amount < 0;
-      const { error } = await supabase.from("transactions").upsert(
+      const { error } = await client.from("transactions").upsert(
         { id: tx.id, name: tx.name, category: tx.category, date: tx.date, amount: Math.abs(tx.amount), type: isExpense ? "expense" : "income" },
         { onConflict: "id" }
       );
@@ -756,7 +828,7 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
   try {
     const localBgs: Budget[] = JSON.parse(localStorage.getItem("finance_budgets") || "[]");
     for (const b of localBgs) {
-      const { error } = await supabase.from("budgets").upsert(
+      const { error } = await client.from("budgets").upsert(
         { id: b.id, category: b.name, used: b.used, total: b.total },
         { onConflict: "id" }
       );
@@ -769,7 +841,7 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
   try {
     const localPortfolio = JSON.parse(localStorage.getItem("finance_portfolio") || '{"stocks":[]}');
     for (const s of localPortfolio.stocks || []) {
-      const { error } = await supabase.from("portfolio_holdings").upsert(
+      const { error } = await client.from("portfolio_holdings").upsert(
         { id: s.id, ticker: s.ticker, name: s.company, value: s.value, change_percent: s.change || 0 },
         { onConflict: "id" }
       );
@@ -782,7 +854,7 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
   try {
     const localGoals: Goal[] = JSON.parse(localStorage.getItem("finance_goals") || "[]");
     for (const g of localGoals) {
-      const { error } = await supabase.from("goals").upsert(
+      const { error } = await client.from("goals").upsert(
         { id: g.id, name: g.name, current: g.current, target: g.target },
         { onConflict: "id" }
       );
@@ -795,7 +867,7 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
   try {
     const localAccts: Account[] = JSON.parse(localStorage.getItem("finance_accounts") || "[]");
     for (const a of localAccts) {
-      const { error } = await supabase.from("accounts").upsert(
+      const { error } = await client.from("accounts").upsert(
         { id: a.id, name: a.name, type: a.type, bank_name: a.bank_name, last_four: a.last_four, balance: a.balance },
         { onConflict: "id" }
       );

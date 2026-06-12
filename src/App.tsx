@@ -32,7 +32,12 @@ import {
   addDbAccount,
   updateDbAccount,
   deleteDbAccount,
-  syncLocalToSupabase
+  syncLocalToSupabase,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  clearSupabaseConfig,
+  testSupabaseConnection,
+  reinitializeSupabaseClient
 } from "./supabaseClient";
 
 export default function App() {
@@ -43,6 +48,7 @@ export default function App() {
   const [copiedSql, setCopiedSql] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<"unknown" | "ok" | "failed">("unknown");
 
   // Core Data States
   const [stats, setStats] = useState<StatData | null>(null);
@@ -244,6 +250,20 @@ export default function App() {
 
   useEffect(() => {
     loadDashboardData();
+  }, []);
+
+  // Check connection status on mount and whenever supabaseClient reinitializes
+  useEffect(() => {
+    const check = async () => {
+      const result = await testSupabaseConnection();
+      setConnectionStatus(result.ok || result.message.includes("tables are missing") ? "ok" : "failed");
+    };
+    if (isSupabaseConfigured()) {
+      reinitializeSupabaseClient();
+      check();
+    } else {
+      setConnectionStatus("unknown");
+    }
   }, []);
 
   // CRUD Handler - Transactions
@@ -508,12 +528,17 @@ export default function App() {
                     
                     {/* Database Setup State Pill representation */}
                     <span className={`border text-[10px] font-mono py-0.5 px-2.5 rounded-full flex items-center gap-1.5 shrink-0 font-medium ${
-                      isSupabaseConfigured
+                      connectionStatus === "ok"
                         ? "bg-[#0c2415] text-[#22c55e] border-[#22c55e]/20"
+                        : connectionStatus === "failed"
+                        ? "bg-red-950/20 text-red-400 border-red-500/10"
                         : "bg-amber-950/20 text-amber-500 border-amber-500/10"
                     }`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${isSupabaseConfigured ? "bg-[#22c55e]" : "bg-amber-500"}`}></span>
-                      <span>{isSupabaseConfigured ? "CLOUD ACTIVE" : "DEVICE ONLY"}</span>
+                      <span className={`h-1.5 w-1.5 rounded-full ${
+                        connectionStatus === "ok" ? "bg-[#22c55e]" : 
+                        connectionStatus === "failed" ? "bg-red-400" : "bg-amber-500"
+                      }`}></span>
+                      <span>{connectionStatus === "ok" ? "CLOUD ACTIVE" : connectionStatus === "failed" ? "CONNECTION FAILED" : "DEVICE ONLY"}</span>
                     </span>
                   </div>
                 </div>
@@ -526,9 +551,11 @@ export default function App() {
                 </div>
               </div>
               <p className="text-xs text-brand-muted mt-1 select-none leading-relaxed">
-              {isSupabaseConfigured 
-                ? "Cloud database connected — all changes sync across devices." 
-                : "Data is saved only on this device. Add Supabase credentials in Settings for cloud sync."}
+              {connectionStatus === "ok"
+                ? "Cloud database connected — all changes sync across devices."
+                : connectionStatus === "failed"
+                ? "Connection to cloud failed. Check your Supabase credentials in Settings."
+                : "Data is saved only on this browser/device. Add Supabase credentials in Settings for cloud sync."}
               </p>
             </div>
 
@@ -782,7 +809,11 @@ export default function App() {
               <div className="bg-[#121212] border border-brand-border rounded-xl p-5 md:p-6 space-y-4 shadow-xl">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 border-b border-zinc-900 pb-4">
                   <div className="flex items-center gap-3">
-                    <div className={`p-2.5 rounded-xl border ${isSupabaseConfigured ? "bg-[#22c55e]/10 text-brand-green border-[#22c55e]/20" : "bg-zinc-900 text-zinc-400 border-zinc-800"}`}>
+                    <div className={`p-2.5 rounded-xl border ${
+                      connectionStatus === "ok" ? "bg-[#22c55e]/10 text-brand-green border-[#22c55e]/20" :
+                      connectionStatus === "failed" ? "bg-red-950/20 text-red-400 border-red-500/10" :
+                      "bg-zinc-900 text-zinc-400 border-zinc-800"
+                    }`}>
                       <Database size={20} />
                     </div>
                     <div>
@@ -792,19 +823,47 @@ export default function App() {
                   </div>
 
                   <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold self-start sm:self-auto border ${
-                    isSupabaseConfigured 
-                      ? "bg-[#0b1f12] text-[#22c55e] border-[#22c55e]/20" 
+                    connectionStatus === "ok"
+                      ? "bg-[#0b1f12] text-[#22c55e] border-[#22c55e]/20"
+                      : connectionStatus === "failed"
+                      ? "bg-red-950/20 text-red-400 border-red-500/10"
                       : "bg-amber-950/20 text-amber-500 border-amber-500/10"
                   }`}>
-                    {isSupabaseConfigured ? "● ACTIVE INTEGRATION" : "● LOCAL STORAGE FALLBACK ACTIVE"}
+                    {connectionStatus === "ok" ? "● ACTIVE INTEGRATION" :
+                     connectionStatus === "failed" ? "● CONNECTION FAILED" :
+                     "● LOCAL STORAGE FALLBACK ACTIVE"}
                   </span>
                 </div>
 
-                {!isSupabaseConfigured ? (
+                {connectionStatus !== "ok" && (
                   <div className="space-y-4 text-xs text-brand-muted leading-relaxed">
                     <p>
-                      We currently fall back to browser <strong className="text-zinc-200">LocalStorage cache</strong> because Supabase credentials are not configured inside environment variables yet.
+                      <strong className="text-zinc-200">Device Only Mode:</strong> data is saved only on this browser/device.
                     </p>
+
+                    {/* CLOUD SYNC SETUP FORM */}
+                    <CloudSyncSetupForm
+                      onStatusChange={async () => {
+                        reinitializeSupabaseClient();
+                        const result = await testSupabaseConnection();
+                        setConnectionStatus(result.ok ? "ok" : result.message.includes("tables are missing") ? "ok" : "failed");
+                        showToastNotification(
+                          result.ok || result.message.includes("tables are missing")
+                            ? "Supabase connected successfully!"
+                            : result.message
+                        );
+                        if (result.ok || result.message.includes("tables are missing")) {
+                          await loadDashboardData();
+                        }
+                      }}
+                      onClear={async () => {
+                        clearSupabaseConfig();
+                        setConnectionStatus("unknown");
+                        reinitializeSupabaseClient();
+                        await loadDashboardData();
+                        showToastNotification("Cloud credentials cleared.");
+                      }}
+                    />
 
                     {/* Safe debug output — only shows existence, not values */}
                     <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-900 space-y-1.5">
@@ -812,65 +871,55 @@ export default function App() {
                       <div className="font-mono text-[11px] space-y-0.5">
                         <div><span className="text-zinc-400">VITE_SUPABASE_URL exists:</span> <span className={Boolean((import.meta as any).env?.VITE_SUPABASE_URL) ? "text-brand-green" : "text-brand-red"}>{Boolean((import.meta as any).env?.VITE_SUPABASE_URL) ? "YES" : "NO"}</span></div>
                         <div><span className="text-zinc-400">VITE_SUPABASE_ANON_KEY exists:</span> <span className={Boolean((import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ? "text-brand-green" : "text-brand-red"}>{Boolean((import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ? "YES" : "NO"}</span></div>
-                        <div className="text-[10px] text-zinc-500 mt-1">This status is evaluated at <strong>build time</strong>. If NO, set the env vars and rebuild.</div>
-                      </div>
-                    </div>
-
-                    <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-900 space-y-2">
-                      <p className="font-semibold text-zinc-200 uppercase font-mono text-[10px] tracking-wider flex items-center gap-1.5">
-                        <Server size={11} className="text-amber-500" />
-                        Required configuration parameters:
-                      </p>
-                      <p>
-                        Please declare the following keys inside the <strong className="text-zinc-200">Secrets (Settings API keys)</strong> panel in your AI Studio dashboard, or your <code className="bg-neutral-900 text-amber-500 px-1.5 py-0.5 rounded font-mono text-[11px]">.env</code> file:
-                      </p>
-                      <div className="bg-black/50 p-3 rounded-lg border border-zinc-900 font-mono text-[11px] text-zinc-300 space-y-1 select-all">
-                        <div>VITE_SUPABASE_URL=https://your-project-id.supabase.co</div>
-                        <div>VITE_SUPABASE_ANON_KEY=your-actual-anon-key</div>
+                        <div className="text-[10px] text-zinc-500 mt-1">Build-time env vars are only available when set before <strong>npm run build</strong>.</div>
                       </div>
                     </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-brand-green font-medium">
-                    ✓ Your application is authenticated with Supabase. All active database states, transaction ledgers, category budgets, portfolio holdings, and targets are synchronized live.
-                  </p>
                 )}
 
-                {/* SYNC LOCAL DATA TO SUPABASE */}
-                {isSupabaseConfigured && (
-                  <div className="border-t border-zinc-900 pt-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h4 className="text-xs font-semibold text-white uppercase tracking-wider font-mono">Sync Local Data to Cloud</h4>
-                        <p className="text-[11px] text-brand-muted mt-0.5">Upload any data stored on this device into Supabase so it appears on all devices.</p>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          setSyncing(true);
-                          setSyncResult(null);
-                          const result = await syncLocalToSupabase();
-                          setSyncResult(result);
-                          setSyncing(false);
-                          if (result.errors.length === 0) showToastNotification(`Synced ${result.synced} records to cloud.`);
-                          else showToastNotification(`Sync completed with ${result.errors.length} error(s).`);
-                          loadDashboardData();
-                        }}
-                        disabled={syncing}
-                        className="text-xs bg-brand-green/10 text-brand-green border border-brand-green/20 hover:bg-brand-green/20 font-semibold px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shrink-0"
-                      >
-                        <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
-                        <span>{syncing ? "Syncing..." : "Sync Now"}</span>
-                      </button>
+                {/* SYNC LOCAL DATA TO SUPABASE (only when configured) */}
+                {connectionStatus === "ok" && (
+                  <>
+                    <div className="space-y-1">
+                      <p className="text-xs text-brand-green font-medium">
+                        ✓ Your application is authenticated with Supabase. All active database states, transaction ledgers, category budgets, portfolio holdings, and targets are synchronized live.
+                      </p>
+                      <p className="text-xs text-brand-muted"><strong className="text-zinc-200">Cloud Active:</strong> data syncs across phone, iPad, and laptop.</p>
                     </div>
-                    {syncResult && (
-                      <div className="text-[11px] font-mono">
-                        <span className="text-brand-green">{syncResult.synced} records synced.</span>
-                        {syncResult.errors.length > 0 && (
-                          <span className="text-brand-red ml-2">{syncResult.errors.length} errors.</span>
-                        )}
+                    <div className="border-t border-zinc-900 pt-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-semibold text-white uppercase tracking-wider font-mono">Sync Local Data to Cloud</h4>
+                          <p className="text-[11px] text-brand-muted mt-0.5">Upload any data stored on this device into Supabase so it appears on all devices.</p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            setSyncing(true);
+                            setSyncResult(null);
+                            const result = await syncLocalToSupabase();
+                            setSyncResult(result);
+                            setSyncing(false);
+                            if (result.errors.length === 0) showToastNotification(`Synced ${result.synced} records to cloud.`);
+                            else showToastNotification(`Sync completed with ${result.errors.length} error(s).`);
+                            await loadDashboardData();
+                          }}
+                          disabled={syncing}
+                          className="text-xs bg-brand-green/10 text-brand-green border border-brand-green/20 hover:bg-brand-green/20 font-semibold px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shrink-0"
+                        >
+                          <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
+                          <span>{syncing ? "Syncing..." : "Sync Now"}</span>
+                        </button>
                       </div>
-                    )}
-                  </div>
+                      {syncResult && (
+                        <div className="text-[11px] font-mono">
+                          <span className="text-brand-green">{syncResult.synced} records synced.</span>
+                          {syncResult.errors.length > 0 && (
+                            <span className="text-brand-red ml-2">{syncResult.errors.length} errors.</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
                 )}
 
                 {/* SQL COPIER FOR TABLE BOOTSTRAP */}
@@ -889,7 +938,7 @@ export default function App() {
                   </div>
 
                   <p className="text-xs text-brand-muted">
-                    Before inserting data, open your <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-zinc-300 underline font-semibold">Supabase Workspace SQL Editor</a>, paste the script below, and run it to initialize all four required schemas:
+                    Before inserting data, open your <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-zinc-300 underline font-semibold">Supabase Workspace SQL Editor</a>, paste the script below, and run it to initialize all required schemas:
                   </p>
 
                   <pre className="bg-[#090909] p-4 rounded-xl border border-neutral-900 font-mono text-[10px] text-brand-green/90 overflow-x-auto max-h-[180px] leading-relaxed select-all">
@@ -1036,9 +1085,140 @@ function AccountsTabContent({
             </div>
           ))}
         </div>
+    </div>
+  );
+}
+
+// ==========================================
+// Cloud Sync Setup Form (inline component)
+// ==========================================
+function CloudSyncSetupForm({ onStatusChange, onClear }: { onStatusChange: () => Promise<void>; onClear: () => Promise<void> }) {
+  const [url, setUrl] = useState("");
+  const [anonKey, setAnonKey] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  // Pre-fill from existing config on mount
+  useEffect(() => {
+    const cfg = getSupabaseConfig();
+    if (cfg.url && cfg.source === "localStorage") {
+      setUrl(cfg.url);
+      setAnonKey(cfg.anonKey);
+    }
+  }, []);
+
+  const handleTestConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      // Temporarily save so testSupabaseConnection can use these credentials
+      saveSupabaseConfig(url.trim(), anonKey.trim());
+      const result = await testSupabaseConnection();
+      setTestResult(result.message);
+      if (!result.ok) {
+        clearSupabaseConfig();
+      }
+    } catch {
+      setTestResult("Connection test failed.");
+      clearSupabaseConfig();
+    }
+    setTesting(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setTestResult(null);
+    try {
+      saveSupabaseConfig(url.trim(), anonKey.trim());
+      const result = await testSupabaseConnection();
+      if (result.ok || result.message.includes("tables are missing")) {
+        setTestResult(result.message);
+        await onStatusChange();
+      } else {
+        setTestResult(result.message);
+        clearSupabaseConfig();
+      }
+    } catch {
+      setTestResult("Failed to save credentials.");
+      clearSupabaseConfig();
+    }
+    setSaving(false);
+  };
+
+  const handleClear = async () => {
+    setUrl("");
+    setAnonKey("");
+    setTestResult(null);
+    await onClear();
+  };
+
+  return (
+    <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-900 space-y-3">
+      <p className="font-semibold text-zinc-200 uppercase font-mono text-[10px] tracking-wider flex items-center gap-1.5">
+        <Server size={11} className="text-amber-500" />
+        Cloud Sync Setup
+      </p>
+      <p className="text-[11px] text-brand-muted">
+        Paste your Supabase project credentials below to enable cloud data sync across all your devices.
+        Only the <strong className="text-zinc-200">anon public key</strong> is needed.
+      </p>
+      <div className="space-y-2.5">
+        <div>
+          <label className="text-[10px] font-mono uppercase tracking-wider text-brand-muted block mb-1">Supabase Project URL</label>
+          <input
+            type="url"
+            placeholder="https://your-project-id.supabase.co"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="w-full bg-black/50 border border-zinc-900 hover:border-zinc-700 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm font-mono text-white transition-colors"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] font-mono uppercase tracking-wider text-brand-muted block mb-1">Supabase Anon Public Key</label>
+          <input
+            type="text"
+            placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            value={anonKey}
+            onChange={(e) => setAnonKey(e.target.value)}
+            className="w-full bg-black/50 border border-zinc-900 hover:border-zinc-700 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm font-mono text-white transition-colors"
+          />
+        </div>
       </div>
-    );
-  }
+      {testResult && (
+        <div className={`text-[11px] font-mono px-3 py-1.5 rounded-lg ${
+          testResult.includes("connected") || testResult.includes("tables are missing")
+            ? "bg-[#0c2415] text-brand-green border border-[#22c55e]/10"
+            : "bg-red-950/20 text-red-400 border border-red-500/10"
+        }`}>
+          {testResult}
+        </div>
+      )}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={handleTestConnection}
+          disabled={testing || !url.trim() || !anonKey.trim()}
+          className="text-xs border border-zinc-800 hover:border-zinc-600 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg transition-all font-semibold disabled:opacity-40 cursor-pointer"
+        >
+          {testing ? "Testing..." : "Test Connection"}
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving || !url.trim() || !anonKey.trim()}
+          className="text-xs bg-brand-green/10 text-brand-green border border-brand-green/20 hover:bg-brand-green/20 font-semibold px-4 py-1.5 rounded-lg transition-all disabled:opacity-40 cursor-pointer"
+        >
+          {saving ? "Saving..." : "Save Cloud Credentials"}
+        </button>
+        <button
+          onClick={handleClear}
+          className="text-xs text-red-400 hover:text-red-300 border border-red-900/30 hover:border-red-700/50 px-3 py-1.5 rounded-lg transition-all font-semibold ml-auto cursor-pointer"
+        >
+          Clear Credentials
+        </button>
+      </div>
+    </div>
+  );
+}
 
   return (
     <div className="space-y-6 flex-1 py-4 shrink-0" id="accounts-pane">
