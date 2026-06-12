@@ -805,6 +805,17 @@ export default function App() {
                     <p>
                       We currently fall back to browser <strong className="text-zinc-200">LocalStorage cache</strong> because Supabase credentials are not configured inside environment variables yet.
                     </p>
+
+                    {/* Safe debug output — only shows existence, not values */}
+                    <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-900 space-y-1.5">
+                      <p className="font-semibold text-zinc-200 uppercase font-mono text-[10px] tracking-wider">Env Variable Status</p>
+                      <div className="font-mono text-[11px] space-y-0.5">
+                        <div><span className="text-zinc-400">VITE_SUPABASE_URL exists:</span> <span className={Boolean((import.meta as any).env?.VITE_SUPABASE_URL) ? "text-brand-green" : "text-brand-red"}>{Boolean((import.meta as any).env?.VITE_SUPABASE_URL) ? "YES" : "NO"}</span></div>
+                        <div><span className="text-zinc-400">VITE_SUPABASE_ANON_KEY exists:</span> <span className={Boolean((import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ? "text-brand-green" : "text-brand-red"}>{Boolean((import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ? "YES" : "NO"}</span></div>
+                        <div className="text-[10px] text-zinc-500 mt-1">This status is evaluated at <strong>build time</strong>. If NO, set the env vars and rebuild.</div>
+                      </div>
+                    </div>
+
                     <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-900 space-y-2">
                       <p className="font-semibold text-zinc-200 uppercase font-mono text-[10px] tracking-wider flex items-center gap-1.5">
                         <Server size={11} className="text-amber-500" />
