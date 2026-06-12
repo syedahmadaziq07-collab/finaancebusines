@@ -1,0 +1,6 @@
+{
+  "name": "FinanceOS",
+  "description": "A comprehensive personal finance dashboard with real-time analytics, spending breakdown, budget monitoring, portfolio valuation, and financial goal tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
