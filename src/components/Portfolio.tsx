@@ -32,6 +32,13 @@ export default function Portfolio({
   const [editChange, setEditChange] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
 
+  // Top-up state
+  const [showTopUpForm, setShowTopUpForm] = useState(false);
+  const [topUpTicker, setTopUpTicker] = useState("");
+  const [topUpAmount, setTopUpAmount] = useState("");
+  const [topUpNote, setTopUpNote] = useState("");
+  const [isTopUpSubmitting, setIsTopUpSubmitting] = useState(false);
+
   if (isLoading) {
     return (
       <div className="bg-brand-card border border-brand-border rounded-2xl p-6 h-[400px] flex flex-col justify-between animate-pulse">
@@ -113,6 +120,30 @@ export default function Portfolio({
       } catch (err) {
         console.error(err);
       }
+    }
+  };
+
+  const handleTopUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!topUpTicker || !topUpAmount) return;
+
+    setIsTopUpSubmitting(true);
+    try {
+      const stock = portfolio.stocks.find(s => s.ticker === topUpTicker);
+      if (!stock) return;
+      const addAmount = parseFloat(topUpAmount);
+      const uniqueId = stock.id || stock.ticker;
+      await onUpdateStock(uniqueId, {
+        value: stock.value + addAmount
+      });
+      setShowTopUpForm(false);
+      setTopUpTicker("");
+      setTopUpAmount("");
+      setTopUpNote("");
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsTopUpSubmitting(false);
     }
   };
 
@@ -222,7 +253,7 @@ export default function Portfolio({
         )}
       </div>
 
-      {/* Buy stock widget button */}
+      {/* Buy stock & Top Up widget buttons */}
       <div className="mt-4 pt-4 border-t border-brand-border flex items-center justify-between gap-2.5">
         <button
           id="btn-buy-stock"
@@ -231,6 +262,20 @@ export default function Portfolio({
         >
           <Plus size={13} />
           <span>Add Asset</span>
+        </button>
+        <button
+          id="btn-top-up"
+          onClick={() => {
+            setTopUpTicker(portfolio.stocks.length > 0 ? portfolio.stocks[0].ticker : "");
+            setTopUpAmount("");
+            setTopUpNote("");
+            setShowTopUpForm(true);
+          }}
+          disabled={portfolio.stocks.length === 0}
+          className="flex-1 border border-brand-border hover:border-neutral-700 text-xs text-brand-muted hover:text-white py-2.5 rounded-xl transition-all font-semibold flex items-center justify-center gap-1.5 active:scale-[0.99] select-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Plus size={13} />
+          <span>Add Value</span>
         </button>
         <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest px-2 select-none">PORTFOLIO INDEX</span>
       </div>
@@ -423,6 +468,90 @@ export default function Portfolio({
                   className="flex-1 bg-white hover:bg-neutral-200 text-black text-xs font-semibold py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   <span>{isUpdating ? "Saving..." : "Save Changes"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* LIGHT MODAL FOR TOP-UP / ADD VALUE */}
+      {showTopUpForm && (
+        <div id="top-up-modal" className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#121212] border border-brand-border rounded-2xl max-w-sm w-full p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-250">
+            <button 
+              onClick={() => setShowTopUpForm(false)}
+              className="absolute top-4 right-4 text-brand-muted hover:text-white p-1 rounded-xl hover:bg-neutral-900 transition-colors"
+            >
+              <X size={16} />
+            </button>
+
+            <header className="mb-5">
+              <h4 className="font-display font-semibold text-lg text-white">Add Value to Asset</h4>
+              <p className="text-xs text-brand-muted mt-0.5">Top up existing holding with additional capital</p>
+            </header>
+
+            <form onSubmit={handleTopUp} className="space-y-4">
+              {/* Select existing asset */}
+              <div>
+                <label className="text-[10px] text-brand-muted font-mono uppercase block mb-1">Select Asset</label>
+                <select
+                  required
+                  value={topUpTicker}
+                  onChange={(e) => setTopUpTicker(e.target.value)}
+                  className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm text-white transition-colors cursor-pointer"
+                >
+                  {portfolio.stocks.map((s) => (
+                    <option key={s.ticker} value={s.ticker}>
+                      {s.ticker} — RM {s.value.toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Amount to add */}
+              <div>
+                <label className="text-[10px] text-brand-muted font-mono uppercase block mb-1">Amount to Add (RM)</label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  step="0.01"
+                  placeholder="e.g. 100"
+                  value={topUpAmount}
+                  onChange={(e) => setTopUpAmount(e.target.value)}
+                  className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm font-mono text-white transition-colors"
+                />
+              </div>
+
+              {/* Optional note */}
+              <div>
+                <label className="text-[10px] text-brand-muted font-mono uppercase block mb-1">Note (optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Monthly top up"
+                  value={topUpNote}
+                  onChange={(e) => setTopUpNote(e.target.value)}
+                  className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm text-white transition-colors"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTopUpForm(false)}
+                  className="flex-1 border border-brand-border hover:border-neutral-800 text-xs text-brand-muted hover:text-white py-2.5 rounded-xl transition-colors font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isTopUpSubmitting}
+                  className="flex-1 bg-white hover:bg-neutral-200 text-black text-xs font-semibold py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  <PlusCircle size={13} />
+                  <span>{isTopUpSubmitting ? "Adding..." : "Add Value"}</span>
                 </button>
               </div>
             </form>
