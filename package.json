@@ -7,9 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "start": "vite preview --host 0.0.0.0",
-    "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "start": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
