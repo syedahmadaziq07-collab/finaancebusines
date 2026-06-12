@@ -104,15 +104,17 @@ export default function App() {
     // 3. Net worth is sum of all account balances
     const netWorthValue = accts.reduce((sum, a) => sum + a.balance, 0);
 
-    // 4. Savings = total available money (accounts primary, income-expenses fallback)
+    // 4. Savings = total available value (accounts + portfolio + goals)
+    const goalsSavedTotal = goals.reduce((sum, g) => sum + g.current, 0);
     let savingsValue: number;
     if (accts.length > 0) {
-      savingsValue = netWorthValue;
+      savingsValue = netWorthValue + portfolioTotal + goalsSavedTotal;
     } else {
       const allIncome = txs.reduce((sum, t) => t.amount > 0 ? sum + t.amount : sum, 0);
       const allExpenses = txs.reduce((sum, t) => t.amount < 0 ? sum + Math.abs(t.amount) : sum, 0);
-      savingsValue = Math.max(0, allIncome - allExpenses);
+      savingsValue = Math.max(0, allIncome - allExpenses) + portfolioTotal + goalsSavedTotal;
     }
+    savingsValue = Math.max(0, savingsValue);
 
     const hasData = txs.length > 0 || stocks.length > 0 || accts.length > 0;
 
@@ -135,7 +137,7 @@ export default function App() {
       savings: {
         value: savingsValue,
         changePercent: 0,
-        changeText: accts.length > 0 ? "Total available money" : (savingsValue > 0 ? "From income balance" : "No data yet")
+        changeText: savingsValue > 0 ? "Including investments" : "No data yet"
       }
     };
 
