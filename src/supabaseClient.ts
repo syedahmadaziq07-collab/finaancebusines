@@ -725,3 +725,84 @@ export async function deleteDbAccount(id: string): Promise<void> {
 
   if (error) throw error;
 }
+
+// ==========================================
+// SYNC LOCAL DATA TO SUPABASE
+// ==========================================
+export async function syncLocalToSupabase(): Promise<{ synced: number; errors: string[] }> {
+  let synced = 0;
+  const errors: string[] = [];
+
+  if (!isSupabaseConfigured || !supabase) {
+    errors.push("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY first.");
+    return { synced, errors };
+  }
+
+  // Sync transactions
+  try {
+    const localTxs: Transaction[] = JSON.parse(localStorage.getItem("finance_transactions") || "[]");
+    for (const tx of localTxs) {
+      const isExpense = tx.amount < 0;
+      const { error } = await supabase.from("transactions").upsert(
+        { id: tx.id, name: tx.name, category: tx.category, date: tx.date, amount: Math.abs(tx.amount), type: isExpense ? "expense" : "income" },
+        { onConflict: "id" }
+      );
+      if (!error) synced++;
+      else errors.push(`Transaction ${tx.name}: ${error.message}`);
+    }
+  } catch (e: any) { errors.push(`Transactions: ${e.message}`); }
+
+  // Sync budgets
+  try {
+    const localBgs: Budget[] = JSON.parse(localStorage.getItem("finance_budgets") || "[]");
+    for (const b of localBgs) {
+      const { error } = await supabase.from("budgets").upsert(
+        { id: b.id, category: b.name, used: b.used, total: b.total },
+        { onConflict: "id" }
+      );
+      if (!error) synced++;
+      else errors.push(`Budget ${b.name}: ${error.message}`);
+    }
+  } catch (e: any) { errors.push(`Budgets: ${e.message}`); }
+
+  // Sync portfolio holdings
+  try {
+    const localPortfolio = JSON.parse(localStorage.getItem("finance_portfolio") || '{"stocks":[]}');
+    for (const s of localPortfolio.stocks || []) {
+      const { error } = await supabase.from("portfolio_holdings").upsert(
+        { id: s.id, ticker: s.ticker, name: s.company, value: s.value, change_percent: s.change || 0 },
+        { onConflict: "id" }
+      );
+      if (!error) synced++;
+      else errors.push(`Stock ${s.ticker}: ${error.message}`);
+    }
+  } catch (e: any) { errors.push(`Portfolio: ${e.message}`); }
+
+  // Sync goals
+  try {
+    const localGoals: Goal[] = JSON.parse(localStorage.getItem("finance_goals") || "[]");
+    for (const g of localGoals) {
+      const { error } = await supabase.from("goals").upsert(
+        { id: g.id, name: g.name, current: g.current, target: g.target },
+        { onConflict: "id" }
+      );
+      if (!error) synced++;
+      else errors.push(`Goal ${g.name}: ${error.message}`);
+    }
+  } catch (e: any) { errors.push(`Goals: ${e.message}`); }
+
+  // Sync accounts
+  try {
+    const localAccts: Account[] = JSON.parse(localStorage.getItem("finance_accounts") || "[]");
+    for (const a of localAccts) {
+      const { error } = await supabase.from("accounts").upsert(
+        { id: a.id, name: a.name, type: a.type, bank_name: a.bank_name, last_four: a.last_four, balance: a.balance },
+        { onConflict: "id" }
+      );
+      if (!error) synced++;
+      else errors.push(`Account ${a.name}: ${error.message}`);
+    }
+  } catch (e: any) { errors.push(`Accounts: ${e.message}`); }
+
+  return { synced, errors };
+}

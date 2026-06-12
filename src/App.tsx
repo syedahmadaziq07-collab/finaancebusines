@@ -31,7 +31,8 @@ import {
   getDbAccounts,
   addDbAccount,
   updateDbAccount,
-  deleteDbAccount
+  deleteDbAccount,
+  syncLocalToSupabase
 } from "./supabaseClient";
 
 export default function App() {
@@ -40,6 +41,8 @@ export default function App() {
   const [showToast, setShowToast] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
 
   // Core Data States
   const [stats, setStats] = useState<StatData | null>(null);
@@ -504,12 +507,14 @@ export default function App() {
                     </h2>
                     
                     {/* Database Setup State Pill representation */}
-                    {isSupabaseConfigured && (
-                      <span className="animate-pulse border text-[10px] font-mono py-0.5 px-2.5 rounded-full flex items-center gap-1.5 shrink-0 font-medium bg-[#0c2415] text-[#22c55e] border-[#22c55e]/20">
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]"></span>
-                        <span>CLOUD ACTIVE</span>
-                      </span>
-                    )}
+                    <span className={`border text-[10px] font-mono py-0.5 px-2.5 rounded-full flex items-center gap-1.5 shrink-0 font-medium ${
+                      isSupabaseConfigured
+                        ? "bg-[#0c2415] text-[#22c55e] border-[#22c55e]/20"
+                        : "bg-amber-950/20 text-amber-500 border-amber-500/10"
+                    }`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${isSupabaseConfigured ? "bg-[#22c55e]" : "bg-amber-500"}`}></span>
+                      <span>{isSupabaseConfigured ? "CLOUD ACTIVE" : "DEVICE ONLY"}</span>
+                    </span>
                   </div>
                 </div>
                 
@@ -521,9 +526,9 @@ export default function App() {
                 </div>
               </div>
               <p className="text-xs text-brand-muted mt-1 select-none leading-relaxed">
-                {isSupabaseConfigured 
-                  ? "Connected to cloud Supabase relational instance. All changes sync dynamically." 
-                  : "No data — connect your account or add entries manually"}
+              {isSupabaseConfigured 
+                ? "Cloud database connected — all changes sync across devices." 
+                : "Data is saved only on this device. Add Supabase credentials in Settings for cloud sync."}
               </p>
             </div>
 
@@ -818,6 +823,43 @@ export default function App() {
                   <p className="text-xs text-brand-green font-medium">
                     ✓ Your application is authenticated with Supabase. All active database states, transaction ledgers, category budgets, portfolio holdings, and targets are synchronized live.
                   </p>
+                )}
+
+                {/* SYNC LOCAL DATA TO SUPABASE */}
+                {isSupabaseConfigured && (
+                  <div className="border-t border-zinc-900 pt-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-semibold text-white uppercase tracking-wider font-mono">Sync Local Data to Cloud</h4>
+                        <p className="text-[11px] text-brand-muted mt-0.5">Upload any data stored on this device into Supabase so it appears on all devices.</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          setSyncing(true);
+                          setSyncResult(null);
+                          const result = await syncLocalToSupabase();
+                          setSyncResult(result);
+                          setSyncing(false);
+                          if (result.errors.length === 0) showToastNotification(`Synced ${result.synced} records to cloud.`);
+                          else showToastNotification(`Sync completed with ${result.errors.length} error(s).`);
+                          loadDashboardData();
+                        }}
+                        disabled={syncing}
+                        className="text-xs bg-brand-green/10 text-brand-green border border-brand-green/20 hover:bg-brand-green/20 font-semibold px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shrink-0"
+                      >
+                        <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
+                        <span>{syncing ? "Syncing..." : "Sync Now"}</span>
+                      </button>
+                    </div>
+                    {syncResult && (
+                      <div className="text-[11px] font-mono">
+                        <span className="text-brand-green">{syncResult.synced} records synced.</span>
+                        {syncResult.errors.length > 0 && (
+                          <span className="text-brand-red ml-2">{syncResult.errors.length} errors.</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* SQL COPIER FOR TABLE BOOTSTRAP */}
