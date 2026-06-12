@@ -64,7 +64,8 @@ export default function App() {
     txs: Transaction[],
     bgs: Budget[],
     stocks: StockInfo[],
-    accts: Account[]
+    accts: Account[],
+    goals: Goal[] = []
   ) => {
     const now = new Date();
     const currentMonth = now.getMonth();
@@ -94,7 +95,7 @@ export default function App() {
       const expenseSum = txs
         .filter((t) => t.category.toLowerCase() === b.name.toLowerCase() && t.amount < 0)
         .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-      return { ...b, used: expenseSum };
+      return { ...b, used: Math.max(b.used, expenseSum) };
     });
 
     // 2. Calculate Portfolio totals
@@ -102,6 +103,16 @@ export default function App() {
 
     // 3. Net worth is sum of all account balances
     const netWorthValue = accts.reduce((sum, a) => sum + a.balance, 0);
+
+    // 4. Savings = total available money (accounts primary, income-expenses fallback)
+    let savingsValue: number;
+    if (accts.length > 0) {
+      savingsValue = netWorthValue;
+    } else {
+      const allIncome = txs.reduce((sum, t) => t.amount > 0 ? sum + t.amount : sum, 0);
+      const allExpenses = txs.reduce((sum, t) => t.amount < 0 ? sum + Math.abs(t.amount) : sum, 0);
+      savingsValue = Math.max(0, allIncome - allExpenses);
+    }
 
     const hasData = txs.length > 0 || stocks.length > 0 || accts.length > 0;
 
@@ -122,9 +133,9 @@ export default function App() {
         changeText: totalExpenses > 0 ? "This Month" : "No data yet"
       },
       savings: {
-        value: Math.max(0, totalIncome - totalExpenses),
-        changePercent: totalIncome > 0 ? Math.round((Math.max(0, totalIncome - totalExpenses) / totalIncome) * 100) : 0,
-        changeText: totalIncome > 0 || totalExpenses > 0 ? "Savings Rate" : "No data yet"
+        value: savingsValue,
+        changePercent: 0,
+        changeText: accts.length > 0 ? "Total available money" : (savingsValue > 0 ? "From income balance" : "No data yet")
       }
     };
 
@@ -211,7 +222,7 @@ export default function App() {
       setAccounts(dbAccts);
 
       // Calculate aggregates
-      const metrics = recalculateAllMetrics(dbTxs, dbBgs, dbAssets, dbAccts);
+      const metrics = recalculateAllMetrics(dbTxs, dbBgs, dbAssets, dbAccts, dbGoals);
       setStats(metrics.stats);
       setSpending(metrics.spending);
       setCashflow(metrics.cashflow);
@@ -612,8 +623,7 @@ export default function App() {
                   title="Savings"
                   value={stats?.savings.value || 0}
                   changePercent={stats?.savings.changePercent || 0}
-                  changeText="Saved this month"
-                  showProgressBar={true}
+                  changeText={stats?.savings.changeText || "Total available money"}
                   isLoading={isLoading}
                 />
               </section>

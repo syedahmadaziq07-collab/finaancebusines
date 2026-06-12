@@ -27,6 +27,7 @@ export default function Budgets({
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
   const [editName, setEditName] = useState("");
   const [editTotal, setEditTotal] = useState("");
+  const [editUsed, setEditUsed] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
 
   if (isLoading) {
@@ -74,6 +75,7 @@ export default function Budgets({
     setEditingBudget(b);
     setEditName(b.name);
     setEditTotal(b.total.toString());
+    setEditUsed(b.used.toString());
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -84,7 +86,8 @@ export default function Budgets({
     try {
       await onUpdateBudget(editingBudget.id, {
         name: editName,
-        total: parseFloat(editTotal)
+        total: parseFloat(editTotal),
+        used: editUsed ? parseFloat(editUsed) : 0
       });
       setEditingBudget(null);
     } catch (err) {
@@ -329,6 +332,19 @@ export default function Budgets({
                   min="1"
                   value={editTotal}
                   onChange={(e) => setEditTotal(e.target.value)}
+                  className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm font-mono text-white transition-colors"
+                />
+              </div>
+
+              {/* Used so far */}
+              <div>
+                <label className="text-[10px] text-brand-muted font-mono uppercase block mb-1">Used So Far (RM, optional)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editUsed}
+                  onChange={(e) => setEditUsed(e.target.value)}
                   className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm font-mono text-white transition-colors"
                 />
               </div>
