@@ -25,8 +25,8 @@ export default function Sidebar({
   setActiveTab, 
   isOpen = false, 
   onClose = () => {},
-  userName = "Syed Aziq",
-  userInitials = "SA"
+  userName = "Coya",
+  userInitials = "CO"
 }: SidebarProps) {
   const menuItems = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },

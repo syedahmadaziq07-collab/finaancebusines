@@ -56,8 +56,8 @@ export default function App() {
   const [apiError, setApiError] = useState<string | null>(null);
 
   // Shared Name Source of Truth
-  const [userName] = useState("Syed Aziq");
-  const [userInitials] = useState("SA");
+  const [userName] = useState("Coya");
+  const [userInitials] = useState("CO");
 
   // Dynamically calculate Stats and Chart Data based on actual active records:
   const recalculateAllMetrics = (
