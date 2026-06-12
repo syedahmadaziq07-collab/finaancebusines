@@ -190,7 +190,7 @@ export default function Transactions({
         <button 
           id="btn-add-transaction"
           onClick={() => {
-            setDate(new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }));
+            setDate(new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }));
             setShowAddForm(true);
           }}
           className="flex items-center gap-1.5 text-xs text-brand-muted hover:text-white border border-brand-border hover:border-neutral-700 bg-neutral-900/60 px-3 py-1.5 rounded-xl transition-colors shrink-0 cursor-pointer"

@@ -105,7 +105,7 @@ export async function addDbTransaction(tx: Omit<Transaction, "id" | "date"> & { 
   const dbRow = {
     name: tx.name,
     category: tx.category,
-    date: tx.date || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    date: tx.date || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     amount: Math.abs(tx.amount),
     type: isExpense ? "expense" : "income"
   };

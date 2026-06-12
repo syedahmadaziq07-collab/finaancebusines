@@ -77,7 +77,10 @@ export default function App() {
     txs.forEach((t) => {
       if (t.date) {
         const d = new Date(t.date);
-        if (!isNaN(d.getTime()) && (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear)) return;
+        if (!isNaN(d.getTime())) {
+          if (d.getMonth() !== currentMonth) return;
+          if (/\d{4}/.test(t.date) && d.getFullYear() !== currentYear) return;
+        }
       }
       if (t.amount > 0) {
         totalIncome += t.amount;
