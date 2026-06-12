@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { Transaction, Budget, StockInfo, Goal } from "./types";
+import { Transaction, Budget, StockInfo, Goal, Account } from "./types";
 
 // Read environment variables safely
 const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || "";
@@ -52,6 +52,19 @@ create table if not exists goals (
   current numeric not null default 0,
   target numeric not null
 );
+
+-- 5. Create Accounts Table
+create table if not exists accounts (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  type text not null,
+  bank_name text not null,
+  last_four text,
+  balance numeric not null default 0,
+  created_at timestamp with time zone default now()
+);
+alter table accounts enable row level security;
+create policy "Allow all on accounts" on accounts for all using (true) with check (true);
 
 -- Optional: Enable row level security (RLS) or disable for testing
 -- alter table transactions disable row level security;
@@ -591,6 +604,122 @@ export async function deleteDbGoal(id: string): Promise<void> {
 
   const { error } = await supabase
     .from("goals")
+    .delete()
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+// ==========================================
+// ACCOUNTS CRUD
+// ==========================================
+export async function getDbAccounts(): Promise<Account[]> {
+  if (!isSupabaseConfigured || !supabase) {
+    return JSON.parse(localStorage.getItem("finance_accounts") || "[]");
+  }
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Supabase error fetching accounts:", error);
+    throw error;
+  }
+
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    bank_name: row.bank_name,
+    last_four: row.last_four || "",
+    balance: Number(row.balance),
+    created_at: row.created_at
+  }));
+}
+
+export async function addDbAccount(account: Omit<Account, "id" | "created_at">): Promise<Account> {
+  const dbRow = {
+    name: account.name,
+    type: account.type,
+    bank_name: account.bank_name,
+    last_four: account.last_four || "",
+    balance: account.balance
+  };
+
+  if (!isSupabaseConfigured || !supabase) {
+    const local = JSON.parse(localStorage.getItem("finance_accounts") || "[]") as Account[];
+    const newAccount: Account = {
+      id: "a-" + Date.now(),
+      ...account
+    };
+    local.unshift(newAccount);
+    localStorage.setItem("finance_accounts", JSON.stringify(local));
+    return newAccount;
+  }
+
+  const { data, error } = await supabase
+    .from("accounts")
+    .insert([dbRow])
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Supabase error inserting account:", error);
+    throw error;
+  }
+
+  return {
+    id: data.id,
+    name: data.name,
+    type: data.type,
+    bank_name: data.bank_name,
+    last_four: data.last_four || "",
+    balance: Number(data.balance),
+    created_at: data.created_at
+  };
+}
+
+export async function updateDbAccount(id: string, account: Partial<Account>): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    const local = JSON.parse(localStorage.getItem("finance_accounts") || "[]") as Account[];
+    const idx = local.findIndex(a => a.id === id);
+    if (idx > -1) {
+      if (account.name !== undefined) local[idx].name = account.name;
+      if (account.type !== undefined) local[idx].type = account.type;
+      if (account.bank_name !== undefined) local[idx].bank_name = account.bank_name;
+      if (account.last_four !== undefined) local[idx].last_four = account.last_four;
+      if (account.balance !== undefined) local[idx].balance = account.balance;
+      localStorage.setItem("finance_accounts", JSON.stringify(local));
+    }
+    return;
+  }
+
+  const updates: any = {};
+  if (account.name !== undefined) updates.name = account.name;
+  if (account.type !== undefined) updates.type = account.type;
+  if (account.bank_name !== undefined) updates.bank_name = account.bank_name;
+  if (account.last_four !== undefined) updates.last_four = account.last_four;
+  if (account.balance !== undefined) updates.balance = account.balance;
+
+  const { error } = await supabase
+    .from("accounts")
+    .update(updates)
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+export async function deleteDbAccount(id: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    const local = JSON.parse(localStorage.getItem("finance_accounts") || "[]") as Account[];
+    const filtered = local.filter(a => a.id !== id);
+    localStorage.setItem("finance_accounts", JSON.stringify(filtered));
+    return;
+  }
+
+  const { error } = await supabase
+    .from("accounts")
     .delete()
     .eq("id", id);
 

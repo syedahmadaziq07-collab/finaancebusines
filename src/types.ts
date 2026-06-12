@@ -64,6 +64,16 @@ export interface PortfolioData {
   stocks: StockInfo[];
 }
 
+export interface Account {
+  id: string;
+  name: string;
+  type: string;
+  bank_name: string;
+  last_four: string;
+  balance: number;
+  created_at?: string;
+}
+
 export interface Goal {
   id: string;
   name: string;

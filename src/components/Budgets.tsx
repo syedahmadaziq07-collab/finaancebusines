@@ -4,7 +4,7 @@ import { Budget } from "../types";
 
 interface BudgetsProps {
   budgets: Budget[];
-  onAddBudget: (budget: { name: string; total: number }) => Promise<void>;
+  onAddBudget: (budget: { name: string; total: number; used?: number }) => Promise<void>;
   onUpdateBudget: (id: string, budget: Partial<Budget>) => Promise<void>;
   onDeleteBudget: (id: string) => Promise<void>;
   isLoading?: boolean;
@@ -20,6 +20,7 @@ export default function Budgets({
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [total, setTotal] = useState("");
+  const [used, setUsed] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Edit State
@@ -55,10 +56,12 @@ export default function Budgets({
     try {
       await onAddBudget({
         name,
-        total: parseFloat(total)
+        total: parseFloat(total),
+        used: used ? parseFloat(used) : 0
       });
       setName("");
       setTotal("");
+      setUsed("");
       setShowForm(false);
     } catch (err) {
       console.error(err);
@@ -236,6 +239,20 @@ export default function Budgets({
                   placeholder="e.g. 200, 500, 1000"
                   value={total}
                   onChange={(e) => setTotal(e.target.value)}
+                  className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm font-mono text-white transition-colors"
+                />
+              </div>
+
+              {/* Used so far */}
+              <div>
+                <label className="text-[10px] text-brand-muted font-mono uppercase block mb-1">Used So Far (RM, optional)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="e.g. 150"
+                  value={used}
+                  onChange={(e) => setUsed(e.target.value)}
                   className="w-full bg-neutral-950 border border-brand-border hover:border-neutral-800 focus:border-white focus:outline-none rounded-xl px-3 py-2 text-sm font-mono text-white transition-colors"
                 />
               </div>
