@@ -1140,92 +1140,104 @@ export async function deleteDbBusiness(id: string): Promise<void> {
 // SYNC LOCAL DATA TO SUPABASE
 // ==========================================
 export async function syncLocalToSupabase(): Promise<{ synced: number; errors: string[] }> {
-  let synced = 0;
+  let totalSynced = 0;
+  const syncRef = { value: 0 };
   const errors: string[] = [];
 
   const client = getSupabaseClient(); if (!client) {
     errors.push("Supabase is not configured. Set credentials in Settings page to enable cloud sync.");
-    return { synced, errors };
+    return { synced: 0, errors };
+  }
+
+  async function syncTable<T>(
+    tableName: string,
+    localStorageKey: string,
+    items: T[],
+    toPayload: (item: T) => Record<string, any>
+  ): Promise<void> {
+    try {
+      if (items.length === 0) return;
+      let localSynced = 0;
+      const perItemErrors = new Map<string, { code: string; message: string; count: number }>();
+      for (const item of items) {
+        try {
+          const { error } = await client!.from(tableName).upsert(toPayload(item), { onConflict: "id" });
+          if (!error) { localSynced++; continue; }
+          const key = `${error.code || "UNKNOWN"}:${error.message}`;
+          if (!perItemErrors.has(key)) {
+            perItemErrors.set(key, { code: error.code || "UNKNOWN", message: error.message, count: 0 });
+          }
+          perItemErrors.get(key)!.count++;
+          console.warn(`[syncLocalToSupabase] ${tableName}: upsert failed`, {
+            code: error.code,
+            message: error.message,
+            payload: Object.fromEntries(Object.entries(toPayload(item)).filter(([k]) => k !== "anon_key"))
+          });
+        } catch (itemErr: any) {
+          const key = `ITEM_ERR:${itemErr.message}`;
+          if (!perItemErrors.has(key)) {
+            perItemErrors.set(key, { code: "ITEM_ERR", message: itemErr.message, count: 0 });
+          }
+          perItemErrors.get(key)!.count++;
+          console.warn(`[syncLocalToSupabase] ${tableName}: item error`, itemErr);
+        }
+      }
+      syncRef.value += localSynced;
+      if (perItemErrors.size > 0) {
+        for (const [, err] of perItemErrors) {
+          errors.push(`Failed syncing ${tableName}: [${err.code}] ${err.message} (localStorage: ${localStorageKey}, attempted: ${items.length} records)`);
+        }
+      }
+    } catch (e: any) {
+      console.error(`[syncLocalToSupabase] ${tableName}: sync error`, e);
+      errors.push(`Failed syncing ${tableName}: ${e.message || e} (localStorage: ${localStorageKey}, attempted: ${items.length || 0} records)`);
+    }
   }
 
   // Sync transactions
-  try {
-    const localTxs: Transaction[] = JSON.parse(localStorage.getItem("finance_transactions") || "[]");
-    for (const tx of localTxs) {
+  const localTxs: Transaction[] = JSON.parse(localStorage.getItem("finance_transactions") || "[]");
+  await syncTable("transactions", "finance_transactions", localTxs,
+    (tx: Transaction) => {
       const isExpense = tx.amount < 0;
-      const { error } = await client.from("transactions").upsert(
-        { id: tx.id, name: tx.name, category: tx.category, date: tx.date, amount: Math.abs(tx.amount), type: isExpense ? "expense" : "income" },
-        { onConflict: "id" }
-      );
-      if (!error) synced++;
-      else errors.push(`Transaction ${tx.name}: ${error.message}`);
+      return {
+        id: tx.id, name: tx.name, category: tx.category, date: tx.date,
+        amount: Math.abs(tx.amount), type: isExpense ? "expense" : "income",
+        business_id: (tx as any).business_id || null,
+        notes: (tx as any).notes || null
+      };
     }
-  } catch (e: any) { errors.push(`Transactions: ${e.message}`); }
+  );
 
   // Sync budgets
-  try {
-    const localBgs: Budget[] = JSON.parse(localStorage.getItem("finance_budgets") || "[]");
-    for (const b of localBgs) {
-      const { error } = await client.from("budgets").upsert(
-        { id: b.id, category: b.name, used: b.used, total: b.total },
-        { onConflict: "id" }
-      );
-      if (!error) synced++;
-      else errors.push(`Budget ${b.name}: ${error.message}`);
-    }
-  } catch (e: any) { errors.push(`Budgets: ${e.message}`); }
+  const localBgs: Budget[] = JSON.parse(localStorage.getItem("finance_budgets") || "[]");
+  await syncTable("budgets", "finance_budgets", localBgs,
+    (b: Budget) => ({ id: b.id, category: b.name, used: b.used, total: b.total })
+  );
 
   // Sync portfolio holdings
-  try {
-    const localPortfolio = JSON.parse(localStorage.getItem("finance_portfolio") || '{"stocks":[]}');
-    for (const s of localPortfolio.stocks || []) {
-      const { error } = await client.from("portfolio_holdings").upsert(
-        { id: s.id, ticker: s.ticker, name: s.company, value: s.value, change_percent: s.change || 0 },
-        { onConflict: "id" }
-      );
-      if (!error) synced++;
-      else errors.push(`Stock ${s.ticker}: ${error.message}`);
-    }
-  } catch (e: any) { errors.push(`Portfolio: ${e.message}`); }
+  const localPortfolio = JSON.parse(localStorage.getItem("finance_portfolio") || '{"stocks":[]}');
+  await syncTable("portfolio_holdings", "finance_portfolio", localPortfolio.stocks || [],
+    (s: any) => ({ id: s.id, ticker: s.ticker, name: s.company, value: s.value, change_percent: s.change || 0 })
+  );
 
   // Sync goals
-  try {
-    const localGoals: Goal[] = JSON.parse(localStorage.getItem("finance_goals") || "[]");
-    for (const g of localGoals) {
-      const { error } = await client.from("goals").upsert(
-        { id: g.id, name: g.name, current: g.current, target: g.target },
-        { onConflict: "id" }
-      );
-      if (!error) synced++;
-      else errors.push(`Goal ${g.name}: ${error.message}`);
-    }
-  } catch (e: any) { errors.push(`Goals: ${e.message}`); }
+  const localGoals: Goal[] = JSON.parse(localStorage.getItem("finance_goals") || "[]");
+  await syncTable("goals", "finance_goals", localGoals,
+    (g: Goal) => ({ id: g.id, name: g.name, current: g.current, target: g.target })
+  );
 
   // Sync accounts
-  try {
-    const localAccts: Account[] = JSON.parse(localStorage.getItem("finance_accounts") || "[]");
-    for (const a of localAccts) {
-      const { error } = await client.from("accounts").upsert(
-        { id: a.id, name: a.name, type: a.type, bank_name: a.bank_name, last_four: a.last_four, balance: a.balance },
-        { onConflict: "id" }
-      );
-      if (!error) synced++;
-      else errors.push(`Account ${a.name}: ${error.message}`);
-    }
-  } catch (e: any) { errors.push(`Accounts: ${e.message}`); }
+  const localAccts: Account[] = JSON.parse(localStorage.getItem("finance_accounts") || "[]");
+  await syncTable("accounts", "finance_accounts", localAccts,
+    (a: Account) => ({ id: a.id, name: a.name, type: a.type, bank_name: a.bank_name, last_four: a.last_four, balance: a.balance })
+  );
 
   // Sync businesses
-  try {
-    const localBizes: Business[] = JSON.parse(localStorage.getItem("finance_businesses") || "[]");
-    for (const b of localBizes) {
-      const { error } = await client.from("businesses").upsert(
-        { id: b.id, name: b.name, type: b.type, description: b.description || null, monthly_target: b.monthlyTarget || 0, status: b.status },
-        { onConflict: "id" }
-      );
-      if (!error) synced++;
-      else errors.push(`Business ${b.name}: ${error.message}`);
-    }
-  } catch (e: any) { errors.push(`Businesses: ${e.message}`); }
+  const localBizes: Business[] = JSON.parse(localStorage.getItem("finance_businesses") || "[]");
+  await syncTable("businesses", "finance_businesses", localBizes,
+    (b: Business) => ({ id: b.id, name: b.name, type: b.type, description: b.description || null, monthly_target: b.monthlyTarget || 0, status: b.status })
+  );
 
-  return { synced, errors };
+  totalSynced = syncRef.value;
+  return { synced: totalSynced, errors };
 }

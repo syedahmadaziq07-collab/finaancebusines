@@ -1000,7 +1000,13 @@ export default function App() {
                         <div className="text-[11px] font-mono">
                           <span className="text-brand-green">{syncResult.synced} records synced.</span>
                           {syncResult.errors.length > 0 && (
-                            <span className="text-brand-red ml-2">{syncResult.errors.length} errors.</span>
+                            <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
+                              {syncResult.errors.map((err, i) => (
+                                <div key={i} className="text-brand-red text-[10px] bg-red-950/10 border border-red-900/20 rounded-lg px-3 py-2 leading-relaxed break-all">
+                                  {err}
+                                </div>
+                              ))}
+                            </div>
                           )}
                         </div>
                       )}
