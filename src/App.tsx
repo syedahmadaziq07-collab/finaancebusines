@@ -982,11 +982,22 @@ export default function App() {
                           onClick={async () => {
                             setSyncing(true);
                             setSyncResult(null);
-                            const result = await syncLocalToSupabase();
-                            setSyncResult(result);
-                            setSyncing(false);
-                            if (result.errors.length === 0) showToastNotification(`Synced ${result.synced} records to cloud.`);
-                            else showToastNotification(`Sync completed with ${result.errors.length} error(s).`);
+                            try {
+                              const result = await syncLocalToSupabase();
+                              setSyncResult(result);
+                              setSyncing(false);
+                              const hasRealErrors = result.errors.some(e => e && e.length > 0);
+                              if (!hasRealErrors && result.errors.length > 0) {
+                                result.errors.forEach((e, i) => console.warn(`[sync] error #${i}:`, e));
+                              }
+                              if (result.errors.length === 0) showToastNotification(`Synced ${result.synced} records to cloud.`);
+                              else showToastNotification(`Sync completed with ${result.errors.length} error(s).`);
+                            } catch (e: any) {
+                              setSyncResult({ synced: 0, errors: [e?.message || "Unknown sync error. Check browser console."] });
+                              setSyncing(false);
+                              showToastNotification("Sync failed unexpectedly.");
+                              console.error("[sync] unexpected error", e);
+                            }
                             await loadDashboardData();
                           }}
                           disabled={syncing}
@@ -996,21 +1007,69 @@ export default function App() {
                           <span>{syncing ? "Syncing..." : "Sync Now"}</span>
                         </button>
                       </div>
+
                       {syncResult && (
                         <div className="text-[11px] font-mono">
-                          <span className="text-brand-green">{syncResult.synced} records synced.</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-brand-green">{syncResult.synced} records synced.</span>
+                            {syncResult.errors.length > 0 && (
+                              <span className="text-brand-red font-semibold">{syncResult.errors.length} error(s)</span>
+                            )}
+                          </div>
                           {syncResult.errors.length > 0 && (
-                            <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
-                              {syncResult.errors.map((err, i) => (
-                                <div key={i} className="text-brand-red text-[10px] bg-red-950/10 border border-red-900/20 rounded-lg px-3 py-2 leading-relaxed break-all">
-                                  {err}
+                            <div className="mt-2 max-h-48 overflow-y-auto space-y-1.5">
+                              {syncResult.errors.some(e => e && e.length > 0) ? (
+                                syncResult.errors.map((err, i) =>
+                                  err ? (
+                                    <div key={i} className="text-brand-red text-[10px] bg-red-950/10 border border-red-900/20 rounded-lg px-3 py-2 leading-relaxed break-all">
+                                      {err}
+                                    </div>
+                                  ) : null
+                                )
+                              ) : (
+                                <div className="text-brand-red text-[10px] bg-red-950/10 border border-red-900/20 rounded-lg px-3 py-2">
+                                  Unknown sync error. Check browser console.
                                 </div>
-                              ))}
+                              )}
                             </div>
                           )}
                         </div>
                       )}
+
+                      {/* LOCAL DATA DEBUG SUMMARY */}
+                      <div className="border-t border-zinc-900 pt-3 space-y-2">
+                        <h4 className="text-[10px] font-mono font-semibold uppercase tracking-wider text-neutral-300">Local data found on this device</h4>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[10px] text-zinc-500">
+                          {([
+                            ["finance_transactions", "transactions"],
+                            ["finance_budgets", "budgets"],
+                            ["finance_portfolio", "portfolio"],
+                            ["finance_goals", "goals"],
+                            ["finance_accounts", "accounts"],
+                            ["finance_businesses", "businesses"],
+                          ] as const).map(([localKey, label]) => {
+                            let count = 0;
+                            let exists = false;
+                            try {
+                              const raw = localStorage.getItem(localKey);
+                              if (raw) {
+                                exists = true;
+                                const parsed = JSON.parse(raw);
+                                if (Array.isArray(parsed)) count = parsed.length;
+                                else if (parsed && typeof parsed === "object" && Array.isArray(parsed.stocks)) count = parsed.stocks.length;
+                              }
+                            } catch {}
+                            return (
+                              <div key={localKey} className="flex justify-between">
+                                <span>{label}:</span>
+                                <span className={exists && count > 0 ? "text-zinc-200" : "text-zinc-600"}>{count}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
+
 
                     {/* SCHEMA AUDIT — only when connected */}
                     <div className="border-t border-zinc-900 pt-4 space-y-3">

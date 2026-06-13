@@ -1174,9 +1174,10 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
             payload: Object.fromEntries(Object.entries(toPayload(item)).filter(([k]) => k !== "anon_key"))
           });
         } catch (itemErr: any) {
-          const key = `ITEM_ERR:${itemErr.message}`;
+          const itemMsg = itemErr?.message || String(itemErr) || "Unknown item error";
+          const key = `ITEM_ERR:${itemMsg}`;
           if (!perItemErrors.has(key)) {
-            perItemErrors.set(key, { code: "ITEM_ERR", message: itemErr.message, count: 0 });
+            perItemErrors.set(key, { code: "ITEM_ERR", message: itemMsg, count: 0 });
           }
           perItemErrors.get(key)!.count++;
           console.warn(`[syncLocalToSupabase] ${tableName}: item error`, itemErr);
@@ -1189,8 +1190,9 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
         }
       }
     } catch (e: any) {
+      const msg = e?.message || String(e) || "Unknown error";
       console.error(`[syncLocalToSupabase] ${tableName}: sync error`, e);
-      errors.push(`Failed syncing ${tableName}: ${e.message || e} (localStorage: ${localStorageKey}, attempted: ${items.length || 0} records)`);
+      errors.push(`Failed syncing ${tableName}: ${msg} (localStorage: ${localStorageKey}, attempted: ${items.length || 0} records)`);
     }
   }
 
@@ -1239,5 +1241,11 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
   );
 
   totalSynced = syncRef.value;
+  // Filter out any empty error strings — replace with fallback
+  for (let i = 0; i < errors.length; i++) {
+    if (!errors[i] || errors[i].trim().length === 0) {
+      errors[i] = "Unknown sync error. Check browser console.";
+    }
+  }
   return { synced: totalSynced, errors };
 }
