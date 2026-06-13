@@ -12,6 +12,9 @@ import { StatData, CashFlowPoint, SpendingCategory, Transaction, Budget, Portfol
 import {
   isSupabaseConfigured,
   SUPABASE_SQL_CREATION_SCHEMA,
+  SUPABASE_SCHEMA_MIGRATION,
+  checkSupabaseSchema,
+  SchemaCheckResult,
   getDbTransactions,
   addDbTransaction,
   updateDbTransaction,
@@ -54,6 +57,9 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"unknown" | "ok" | "failed">("unknown");
+  const [schemaResults, setSchemaResults] = useState<SchemaCheckResult[] | null>(null);
+  const [checkingSchema, setCheckingSchema] = useState(false);
+  const [copiedMigration, setCopiedMigration] = useState(false);
 
   // Core Data States
   const [stats, setStats] = useState<StatData | null>(null);
@@ -512,6 +518,23 @@ export default function App() {
     setCopiedSql(true);
     showToastNotification("SQL Creation Script copied to clipboard!");
     setTimeout(() => setCopiedSql(false), 2000);
+  };
+
+  const handleCheckSchema = async () => {
+    setCheckingSchema(true);
+    setSchemaResults(null);
+    const results = await checkSupabaseSchema();
+    setSchemaResults(results);
+    setCheckingSchema(false);
+    const allOk = results.every(r => r.exists && r.columns.every(c => c.exists));
+    showToastNotification(allOk ? "Schema check complete — all tables and columns verified." : "Schema check complete — some items are missing. See details below.");
+  };
+
+  const copyMigrationToClipboard = () => {
+    navigator.clipboard.writeText(SUPABASE_SCHEMA_MIGRATION);
+    setCopiedMigration(true);
+    showToastNotification("Migration script copied to clipboard!");
+    setTimeout(() => setCopiedMigration(false), 2000);
   };
 
   const alertsList = [
@@ -982,6 +1005,49 @@ export default function App() {
                         </div>
                       )}
                     </div>
+
+                    {/* SCHEMA AUDIT — only when connected */}
+                    <div className="border-t border-zinc-900 pt-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-semibold text-white uppercase tracking-wider font-mono">Schema Audit</h4>
+                          <p className="text-[11px] text-brand-muted mt-0.5">Check that all required tables and columns exist in Supabase.</p>
+                        </div>
+                        <button
+                          onClick={handleCheckSchema}
+                          disabled={checkingSchema}
+                          className="text-xs bg-indigo-950/20 text-indigo-300 border border-indigo-900/40 hover:bg-indigo-950/30 font-semibold px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shrink-0"
+                        >
+                          <Database size={13} className={checkingSchema ? "animate-pulse" : ""} />
+                          <span>{checkingSchema ? "Checking..." : "Check Schema"}</span>
+                        </button>
+                      </div>
+                      {schemaResults && (
+                        <div className="space-y-1.5 font-mono text-[11px]">
+                          {schemaResults.map(t => (
+                            <div key={t.table} className="flex items-start gap-2">
+                              <span className={t.exists ? "text-brand-green" : "text-brand-red shrink-0 mt-0.5"}>{t.exists ? "✓" : "✗"}</span>
+                              <div>
+                                <span className={t.exists ? "text-zinc-200" : "text-brand-red"}>{t.table}</span>
+                                {t.exists && t.columns.length > 0 && (
+                                  <div className="text-[10px] text-zinc-500 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                                    {t.columns.map(c => (
+                                      <span key={c.name} className={c.exists ? "text-zinc-400" : "text-brand-red"}>
+                                        {c.name} {c.exists ? "✓" : "✗"}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {!t.exists && <span className="text-[10px] text-zinc-500 ml-1">— table not found</span>}
+                              </div>
+                            </div>
+                          ))}
+                          {schemaResults.every(r => r.exists && r.columns.every(c => c.exists)) && (
+                            <p className="text-brand-green text-[10px] pt-1">All tables and columns verified.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
 
@@ -1007,10 +1073,35 @@ export default function App() {
                   <pre className="bg-[#090909] p-4 rounded-xl border border-neutral-900 font-mono text-[10px] text-brand-green/90 overflow-x-auto max-h-[180px] leading-relaxed select-all">
                     {SUPABASE_SQL_CREATION_SCHEMA}
                   </pre>
+                  </div>
                 </div>
-              </div>
 
-              <div className="bg-brand-card border border-brand-border rounded-xl divide-y divide-neutral-900 overflow-hidden">
+                {/* SAFE MIGRATION SCRIPT */}
+                <div className="bg-brand-card border border-brand-border rounded-xl divide-y divide-neutral-900 overflow-hidden">
+                  <div className="p-5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-300 font-bold flex items-center gap-1.5">
+                        <Server size={12} />
+                        <span>Safe Migration Script</span>
+                      </span>
+                      <button
+                        onClick={copyMigrationToClipboard}
+                        className="text-xs text-neutral-300 hover:text-white bg-neutral-900 hover:bg-neutral-950 border border-brand-border px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer font-semibold"
+                      >
+                        <Copy size={12} />
+                        <span>{copiedMigration ? "Copied!" : "Copy Migration Script"}</span>
+                      </button>
+                    </div>
+                    <p className="text-xs text-brand-muted">
+                      For existing Supabase databases. Uses <code className="text-zinc-300">add column if not exists</code> so it is safe to run on live data.
+                    </p>
+                    <pre className="bg-[#090909] p-4 rounded-xl border border-neutral-900 font-mono text-[10px] text-brand-green/90 overflow-x-auto max-h-[180px] leading-relaxed select-all">
+                      {SUPABASE_SCHEMA_MIGRATION}
+                    </pre>
+                  </div>
+                </div>
+
+                <div className="bg-brand-card border border-brand-border rounded-xl divide-y divide-neutral-900 overflow-hidden">
                 <div className="p-5 space-y-2">
                   <h4 className="text-sm font-semibold text-white">FinanceOS Currency Mapping</h4>
                   <p className="text-xs text-brand-muted">Configure active base accounting representation standard.</p>

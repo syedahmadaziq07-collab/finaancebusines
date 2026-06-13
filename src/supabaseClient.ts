@@ -88,9 +88,23 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; message: 
 // ==========================================
 // SQL Schema Setup Helper (for display)
 // ==========================================
-export const SUPABASE_SQL_CREATION_SCHEMA = `-- Execute this SQL script in your Supabase SQL Editor:
+export const SUPABASE_SQL_CREATION_SCHEMA = `-- =============================================
+-- FinanceOS Complete Supabase Schema Setup
+-- Safe to run multiple times (idempotent)
+-- =============================================
 
--- 1. Create Transactions Table
+-- 1. Create Businesses Table (no FK dependencies)
+create table if not exists businesses (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  type text not null,
+  description text,
+  monthly_target numeric default 0,
+  status text not null default 'active',
+  created_at timestamp with time zone default now()
+);
+
+-- 2. Create Transactions Table (references businesses)
 create table if not exists transactions (
   id uuid default gen_random_uuid() primary key,
   name text not null,
@@ -102,20 +116,7 @@ create table if not exists transactions (
   notes text
 );
 
--- 2. Create Businesses Table
-create table if not exists businesses (
-  id uuid default gen_random_uuid() primary key,
-  name text not null,
-  type text not null,
-  description text,
-  monthly_target numeric default 0,
-  status text not null default 'active',
-  created_at timestamp with time zone default now()
-);
-alter table businesses enable row level security;
-create policy "Allow all on businesses" on businesses for all using (true) with check (true);
-
--- 2. Create Budgets Table
+-- 3. Create Budgets Table
 create table if not exists budgets (
   id uuid default gen_random_uuid() primary key,
   category text not null unique,
@@ -123,7 +124,7 @@ create table if not exists budgets (
   total numeric not null
 );
 
--- 3. Create Portfolio Holdings Table
+-- 4. Create Portfolio Holdings Table
 create table if not exists portfolio_holdings (
   id uuid default gen_random_uuid() primary key,
   ticker text not null unique,
@@ -132,7 +133,7 @@ create table if not exists portfolio_holdings (
   change_percent numeric not null default 0
 );
 
--- 4. Create Goals Table
+-- 5. Create Goals Table
 create table if not exists goals (
   id uuid default gen_random_uuid() primary key,
   name text not null unique,
@@ -140,7 +141,7 @@ create table if not exists goals (
   target numeric not null
 );
 
--- 5. Create Accounts Table
+-- 6. Create Accounts Table
 create table if not exists accounts (
   id uuid default gen_random_uuid() primary key,
   name text not null,
@@ -150,15 +151,208 @@ create table if not exists accounts (
   balance numeric not null default 0,
   created_at timestamp with time zone default now()
 );
+
+-- =============================================
+-- Row Level Security (single-user / anon access)
+-- =============================================
+alter table businesses enable row level security;
+alter table transactions enable row level security;
+alter table budgets enable row level security;
+alter table portfolio_holdings enable row level security;
+alter table goals enable row level security;
 alter table accounts enable row level security;
+
+-- Drop existing policies before recreating (safe for re-runs)
+drop policy if exists "Allow all on businesses" on businesses;
+drop policy if exists "Allow all on transactions" on transactions;
+drop policy if exists "Allow all on budgets" on budgets;
+drop policy if exists "Allow all on portfolio_holdings" on portfolio_holdings;
+drop policy if exists "Allow all on goals" on goals;
+drop policy if exists "Allow all on accounts" on accounts;
+
+-- Create permissive policies for anon key access (single-user mode)
+create policy "Allow all on businesses" on businesses for all using (true) with check (true);
+create policy "Allow all on transactions" on transactions for all using (true) with check (true);
+create policy "Allow all on budgets" on budgets for all using (true) with check (true);
+create policy "Allow all on portfolio_holdings" on portfolio_holdings for all using (true) with check (true);
+create policy "Allow all on goals" on goals for all using (true) with check (true);
 create policy "Allow all on accounts" on accounts for all using (true) with check (true);
 
--- Optional: Enable row level security (RLS) or disable for testing
--- alter table transactions disable row level security;
--- alter table budgets disable row level security;
--- alter table portfolio_holdings disable row level security;
--- alter table goals disable row level security;
-`;
+-- Grant anon role schema + table access
+grant usage on schema public to anon;
+grant all on all tables in schema public to anon;
+
+-- Reload schema cache so Supabase REST API sees new tables/columns
+notify pgrst, 'reload schema';`;
+
+// ==========================================
+// Safe Migration Script (for existing databases)
+// Only adds missing columns, never drops data
+// ==========================================
+export const SUPABASE_SCHEMA_MIGRATION = `-- =============================================
+-- FinanceOS Safe Schema Migration
+-- Safe to run multiple times on existing data
+-- Uses: add column if not exists, create table if not exists
+-- Does NOT drop or alter existing columns or data
+-- =============================================
+
+-- Ensure businesses table exists
+create table if not exists businesses (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  type text not null,
+  description text,
+  monthly_target numeric default 0,
+  status text not null default 'active',
+  created_at timestamp with time zone default now()
+);
+
+-- Ensure transactions table exists
+create table if not exists transactions (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  category text not null,
+  date text not null,
+  amount numeric not null,
+  type text not null
+);
+
+-- Add business_id column to transactions if missing
+alter table transactions add column if not exists business_id uuid references businesses(id) on delete set null;
+
+-- Add notes column to transactions if missing
+alter table transactions add column if not exists notes text;
+
+-- Ensure budgets table exists
+create table if not exists budgets (
+  id uuid default gen_random_uuid() primary key,
+  category text not null unique,
+  used numeric not null default 0,
+  total numeric not null
+);
+
+-- Ensure portfolio_holdings table exists
+create table if not exists portfolio_holdings (
+  id uuid default gen_random_uuid() primary key,
+  ticker text not null unique,
+  name text not null,
+  value numeric not null default 0,
+  change_percent numeric not null default 0
+);
+
+-- Ensure goals table exists
+create table if not exists goals (
+  id uuid default gen_random_uuid() primary key,
+  name text not null unique,
+  current numeric not null default 0,
+  target numeric not null
+);
+
+-- Ensure accounts table exists
+create table if not exists accounts (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  type text not null,
+  bank_name text not null,
+  last_four text,
+  balance numeric not null default 0,
+  created_at timestamp with time zone default now()
+);
+
+-- =============================================
+-- RLS and Permissions (idempotent)
+-- =============================================
+alter table businesses enable row level security;
+alter table transactions enable row level security;
+alter table budgets enable row level security;
+alter table portfolio_holdings enable row level security;
+alter table goals enable row level security;
+alter table accounts enable row level security;
+
+drop policy if exists "Allow all on businesses" on businesses;
+drop policy if exists "Allow all on transactions" on transactions;
+drop policy if exists "Allow all on budgets" on budgets;
+drop policy if exists "Allow all on portfolio_holdings" on portfolio_holdings;
+drop policy if exists "Allow all on goals" on goals;
+drop policy if exists "Allow all on accounts" on accounts;
+
+create policy "Allow all on businesses" on businesses for all using (true) with check (true);
+create policy "Allow all on transactions" on transactions for all using (true) with check (true);
+create policy "Allow all on budgets" on budgets for all using (true) with check (true);
+create policy "Allow all on portfolio_holdings" on portfolio_holdings for all using (true) with check (true);
+create policy "Allow all on goals" on goals for all using (true) with check (true);
+create policy "Allow all on accounts" on accounts for all using (true) with check (true);
+
+grant usage on schema public to anon;
+grant all on all tables in schema public to anon;
+
+notify pgrst, 'reload schema';`;
+
+// ==========================================
+// Schema Audit — check what exists in Supabase
+// ==========================================
+export interface SchemaCheckResult {
+  table: string;
+  exists: boolean;
+  columns: { name: string; exists: boolean }[];
+}
+
+export async function checkSupabaseSchema(): Promise<SchemaCheckResult[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  const tables = [
+    { name: "transactions", cols: ["id", "name", "category", "date", "amount", "type", "business_id", "notes"] },
+    { name: "businesses", cols: ["id", "name", "type", "description", "monthly_target", "status", "created_at"] },
+    { name: "budgets", cols: ["id", "category", "used", "total"] },
+    { name: "portfolio_holdings", cols: ["id", "ticker", "name", "value", "change_percent"] },
+    { name: "goals", cols: ["id", "name", "current", "target"] },
+    { name: "accounts", cols: ["id", "name", "type", "bank_name", "last_four", "balance", "created_at"] }
+  ];
+
+  const results: SchemaCheckResult[] = [];
+
+  for (const table of tables) {
+    const entry: SchemaCheckResult = { table: table.name, exists: false, columns: [] };
+    try {
+      // Check if table exists by selecting 0 rows
+      const { error } = await client.from(table.name).select("id", { count: "exact", head: true }).limit(0);
+      if (error) {
+        if (error.code === "42P01") {
+          entry.exists = false;
+        } else {
+          // Table exists but query failed for another reason — still mark as exists
+          entry.exists = true;
+          // Try to probe each column via a select
+          for (const col of table.cols) {
+            try {
+              const { error: colErr } = await client.from(table.name).select(col, { head: true }).limit(0);
+              entry.columns.push({ name: col, exists: !colErr });
+            } catch {
+              entry.columns.push({ name: col, exists: false });
+            }
+          }
+        }
+      } else {
+        entry.exists = true;
+        // Probe each column
+        for (const col of table.cols) {
+          try {
+            const { error: colErr } = await client.from(table.name).select(col, { head: true }).limit(0);
+            entry.columns.push({ name: col, exists: !colErr });
+          } catch {
+            entry.columns.push({ name: col, exists: false });
+          }
+        }
+      }
+    } catch {
+      entry.exists = false;
+    }
+    results.push(entry);
+  }
+
+  return results;
+}
 
 // ==========================================
 // TRANSACTIONS CRUD
