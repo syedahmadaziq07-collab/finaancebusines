@@ -8,7 +8,7 @@ import Transactions from "./components/Transactions";
 import Budgets from "./components/Budgets";
 import Portfolio from "./components/Portfolio";
 import Goals from "./components/Goals";
-import { StatData, CashFlowPoint, SpendingCategory, Transaction, Budget, PortfolioData, Goal, StockInfo, Account } from "./types";
+import { StatData, CashFlowPoint, SpendingCategory, Transaction, Budget, PortfolioData, Goal, StockInfo, Account, Business } from "./types";
 import {
   isSupabaseConfigured,
   SUPABASE_SQL_CREATION_SCHEMA,
@@ -32,6 +32,10 @@ import {
   addDbAccount,
   updateDbAccount,
   deleteDbAccount,
+  getDbBusinesses,
+  addDbBusiness,
+  updateDbBusiness,
+  deleteDbBusiness,
   syncLocalToSupabase,
   getSupabaseConfig,
   saveSupabaseConfig,
@@ -39,6 +43,7 @@ import {
   testSupabaseConnection,
   reinitializeSupabaseClient
 } from "./supabaseClient";
+import BusinessOS from "./components/BusinessOS";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
@@ -59,6 +64,7 @@ export default function App() {
   const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [businesses, setBusinesses] = useState<Business[]>([]);
 
   // Loading & Error States
   const [isLoading, setIsLoading] = useState(true);
@@ -219,18 +225,20 @@ export default function App() {
       setApiError(null);
 
       // Fetch from Supabase service clients
-      const [dbTxs, dbBgs, dbAssets, dbGoals, dbAccts] = await Promise.all([
+      const [dbTxs, dbBgs, dbAssets, dbGoals, dbAccts, dbBiz] = await Promise.all([
         getDbTransactions(),
         getDbBudgets(),
         getDbPortfolioHoldings(),
         getDbGoals(),
-        getDbAccounts()
+        getDbAccounts(),
+        getDbBusinesses()
       ]);
 
       setTransactions(dbTxs);
       setBudgets(dbBgs);
       setGoals(dbGoals);
       setAccounts(dbAccts);
+      setBusinesses(dbBiz);
 
       // Calculate aggregates
       const metrics = recalculateAllMetrics(dbTxs, dbBgs, dbAssets, dbAccts, dbGoals);
@@ -440,6 +448,37 @@ export default function App() {
       await loadDashboardData();
     } catch (err) {
       showToastNotification(`Error deleting account.`);
+    }
+  };
+
+  // CRUD Handler - Businesses
+  const handleAddBusiness = async (biz: { name: string; type: string; description?: string; monthlyTarget?: number }) => {
+    try {
+      await addDbBusiness(biz);
+      showToastNotification(`Business created: ${biz.name}`);
+      await loadDashboardData();
+    } catch (err) {
+      showToastNotification(`Error creating business.`);
+    }
+  };
+
+  const handleUpdateBusiness = async (id: string, updates: Partial<Business>) => {
+    try {
+      await updateDbBusiness(id, updates);
+      showToastNotification(`Business updated.`);
+      await loadDashboardData();
+    } catch (err) {
+      showToastNotification(`Error updating business.`);
+    }
+  };
+
+  const handleDeleteBusiness = async (id: string) => {
+    try {
+      await deleteDbBusiness(id);
+      showToastNotification(`Business removed.`);
+      await loadDashboardData();
+    } catch (err) {
+      showToastNotification(`Error deleting business.`);
     }
   };
 
@@ -798,6 +837,28 @@ export default function App() {
                 onDeleteStock={handleDeleteStock}
                 isLoading={isLoading}
               />
+            </div>
+          )}
+
+          {activeTab === "business" && (
+            <div className="space-y-4 flex-1 py-4 shrink-0 animate-fade-in" id="business-pane">
+              <BusinessOS
+                businesses={businesses}
+                transactions={transactions}
+                onAddBusiness={handleAddBusiness}
+                onUpdateBusiness={handleUpdateBusiness}
+                onDeleteBusiness={handleDeleteBusiness}
+                onAddTransaction={handleAddTransaction}
+              />
+            </div>
+          )}
+
+          {activeTab === "reports" && (
+            <div className="space-y-6 flex-1 py-4 shrink-0 animate-fade-in" id="reports-pane">
+              <h3 className="font-display font-bold text-xl text-white">Reports & Insights</h3>
+              <div className="bg-[#121212] border border-brand-border rounded-xl p-8 text-center">
+                <p className="text-sm text-zinc-500">Coming soon — comprehensive business and financial reports.</p>
+              </div>
             </div>
           )}
 

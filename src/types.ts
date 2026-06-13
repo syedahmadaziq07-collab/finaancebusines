@@ -40,6 +40,18 @@ export interface Transaction {
   date: string;
   amount: number; // Positive for income, negative for expense
   iconName?: string;
+  business_id?: string;
+  notes?: string;
+}
+
+export interface Business {
+  id: string;
+  name: string;
+  type: string; // 'Digital Product' | 'Subscription' | 'Service' | 'Rental' | 'Other'
+  description?: string;
+  monthlyTarget?: number;
+  status: 'active' | 'inactive';
+  created_at?: string;
 }
 
 export interface Budget {

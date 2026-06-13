@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { Transaction, Budget, StockInfo, Goal, Account } from "./types";
+import { Transaction, Budget, StockInfo, Goal, Account, Business } from "./types";
 
 // ==========================================
 // RUNTIME SUPABASE CONFIG
@@ -97,8 +97,23 @@ create table if not exists transactions (
   category text not null,
   date text not null,
   amount numeric not null,
-  type text not null -- 'income' or 'expense'
+  type text not null, -- 'income' or 'expense'
+  business_id uuid references businesses(id) on delete set null,
+  notes text
 );
+
+-- 2. Create Businesses Table
+create table if not exists businesses (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  type text not null,
+  description text,
+  monthly_target numeric default 0,
+  status text not null default 'active',
+  created_at timestamp with time zone default now()
+);
+alter table businesses enable row level security;
+create policy "Allow all on businesses" on businesses for all using (true) with check (true);
 
 -- 2. Create Budgets Table
 create table if not exists budgets (
@@ -168,19 +183,23 @@ export async function getDbTransactions(): Promise<Transaction[]> {
     name: row.name,
     category: row.category,
     date: row.date,
-    amount: row.type === "expense" ? -Math.abs(Number(row.amount)) : Math.abs(Number(row.amount))
+    amount: row.type === "expense" ? -Math.abs(Number(row.amount)) : Math.abs(Number(row.amount)),
+    business_id: row.business_id || undefined,
+    notes: row.notes || undefined
   }));
 }
 
 export async function addDbTransaction(tx: Omit<Transaction, "id" | "date"> & { date?: string }): Promise<Transaction> {
   const isExpense = tx.amount < 0;
-  const dbRow = {
+  const dbRow: any = {
     name: tx.name,
     category: tx.category,
     date: tx.date || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     amount: Math.abs(tx.amount),
     type: isExpense ? "expense" : "income"
   };
+  if (tx.business_id) dbRow.business_id = tx.business_id;
+  if (tx.notes) dbRow.notes = tx.notes;
 
   const client = getSupabaseClient(); if (!client) {
     const local = JSON.parse(localStorage.getItem("finance_transactions") || "[]");
@@ -189,7 +208,9 @@ export async function addDbTransaction(tx: Omit<Transaction, "id" | "date"> & { 
       name: tx.name,
       category: tx.category,
       date: dbRow.date,
-      amount: tx.amount
+      amount: tx.amount,
+      business_id: tx.business_id,
+      notes: tx.notes
     };
     local.unshift(newTx);
     localStorage.setItem("finance_transactions", JSON.stringify(local));
@@ -212,7 +233,9 @@ export async function addDbTransaction(tx: Omit<Transaction, "id" | "date"> & { 
     name: data.name,
     category: data.category,
     date: data.date,
-    amount: data.type === "expense" ? -Object(data.amount) : Object(data.amount)
+    amount: data.type === "expense" ? -Object(data.amount) : Object(data.amount),
+    business_id: data.business_id || undefined,
+    notes: data.notes || undefined
   };
 }
 
@@ -225,6 +248,8 @@ export async function updateDbTransaction(id: string, tx: Partial<Transaction>):
       if (tx.category !== undefined) local[idx].category = tx.category;
       if (tx.amount !== undefined) local[idx].amount = tx.amount;
       if (tx.date !== undefined) local[idx].date = tx.date;
+      if (tx.business_id !== undefined) local[idx].business_id = tx.business_id;
+      if (tx.notes !== undefined) local[idx].notes = tx.notes;
       localStorage.setItem("finance_transactions", JSON.stringify(local));
     }
     return;
@@ -234,6 +259,8 @@ export async function updateDbTransaction(id: string, tx: Partial<Transaction>):
   if (tx.name !== undefined) updates.name = tx.name;
   if (tx.category !== undefined) updates.category = tx.category;
   if (tx.date !== undefined) updates.date = tx.date;
+  if (tx.notes !== undefined) updates.notes = tx.notes;
+  if (tx.business_id !== undefined) updates.business_id = tx.business_id;
   if (tx.amount !== undefined) {
     updates.amount = Math.abs(tx.amount);
     updates.type = tx.amount < 0 ? "expense" : "income";
@@ -799,6 +826,123 @@ export async function deleteDbAccount(id: string): Promise<void> {
 }
 
 // ==========================================
+// BUSINESSES CRUD
+// ==========================================
+export async function getDbBusinesses(): Promise<Business[]> {
+  const client = getSupabaseClient(); if (!client) {
+    return JSON.parse(localStorage.getItem("finance_businesses") || "[]");
+  }
+  const { data, error } = await client
+    .from("businesses")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Supabase error fetching businesses:", error);
+    throw error;
+  }
+
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    description: row.description || undefined,
+    monthlyTarget: row.monthly_target ? Number(row.monthly_target) : undefined,
+    status: row.status || "active",
+    created_at: row.created_at
+  }));
+}
+
+export async function addDbBusiness(business: { name: string; type: string; description?: string; monthlyTarget?: number }): Promise<Business> {
+  const dbRow: any = {
+    name: business.name,
+    type: business.type,
+    status: "active"
+  };
+  if (business.description) dbRow.description = business.description;
+  if (business.monthlyTarget) dbRow.monthly_target = business.monthlyTarget;
+
+  const client = getSupabaseClient(); if (!client) {
+    const local = JSON.parse(localStorage.getItem("finance_businesses") || "[]") as Business[];
+    const newBiz: Business = {
+      id: "biz-" + Date.now(),
+      name: business.name,
+      type: business.type,
+      description: business.description,
+      monthlyTarget: business.monthlyTarget,
+      status: "active"
+    };
+    local.unshift(newBiz);
+    localStorage.setItem("finance_businesses", JSON.stringify(local));
+    return newBiz;
+  }
+
+  const { data, error } = await client
+    .from("businesses")
+    .insert([dbRow])
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return {
+    id: data.id,
+    name: data.name,
+    type: data.type,
+    description: data.description || undefined,
+    monthlyTarget: data.monthly_target ? Number(data.monthly_target) : undefined,
+    status: data.status || "active",
+    created_at: data.created_at
+  };
+}
+
+export async function updateDbBusiness(id: string, updates: Partial<Business>): Promise<void> {
+  const client = getSupabaseClient(); if (!client) {
+    const local = JSON.parse(localStorage.getItem("finance_businesses") || "[]") as Business[];
+    const idx = local.findIndex(b => b.id === id);
+    if (idx > -1) {
+      if (updates.name !== undefined) local[idx].name = updates.name;
+      if (updates.type !== undefined) local[idx].type = updates.type;
+      if (updates.description !== undefined) local[idx].description = updates.description;
+      if (updates.monthlyTarget !== undefined) local[idx].monthlyTarget = updates.monthlyTarget;
+      if (updates.status !== undefined) local[idx].status = updates.status;
+      localStorage.setItem("finance_businesses", JSON.stringify(local));
+    }
+    return;
+  }
+
+  const dbUpdates: any = {};
+  if (updates.name !== undefined) dbUpdates.name = updates.name;
+  if (updates.type !== undefined) dbUpdates.type = updates.type;
+  if (updates.description !== undefined) dbUpdates.description = updates.description;
+  if (updates.monthlyTarget !== undefined) dbUpdates.monthly_target = updates.monthlyTarget;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+
+  const { error } = await client
+    .from("businesses")
+    .update(dbUpdates)
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+export async function deleteDbBusiness(id: string): Promise<void> {
+  const client = getSupabaseClient(); if (!client) {
+    const local = JSON.parse(localStorage.getItem("finance_businesses") || "[]") as Business[];
+    const filtered = local.filter(b => b.id !== id);
+    localStorage.setItem("finance_businesses", JSON.stringify(filtered));
+    return;
+  }
+
+  const { error } = await client
+    .from("businesses")
+    .delete()
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+// ==========================================
 // SYNC LOCAL DATA TO SUPABASE
 // ==========================================
 export async function syncLocalToSupabase(): Promise<{ synced: number; errors: string[] }> {
@@ -875,6 +1019,19 @@ export async function syncLocalToSupabase(): Promise<{ synced: number; errors: s
       else errors.push(`Account ${a.name}: ${error.message}`);
     }
   } catch (e: any) { errors.push(`Accounts: ${e.message}`); }
+
+  // Sync businesses
+  try {
+    const localBizes: Business[] = JSON.parse(localStorage.getItem("finance_businesses") || "[]");
+    for (const b of localBizes) {
+      const { error } = await client.from("businesses").upsert(
+        { id: b.id, name: b.name, type: b.type, description: b.description || null, monthly_target: b.monthlyTarget || 0, status: b.status },
+        { onConflict: "id" }
+      );
+      if (!error) synced++;
+      else errors.push(`Business ${b.name}: ${error.message}`);
+    }
+  } catch (e: any) { errors.push(`Businesses: ${e.message}`); }
 
   return { synced, errors };
 }

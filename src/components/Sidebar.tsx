@@ -6,7 +6,9 @@ import {
   ArrowLeftRight, 
   Target, 
   Briefcase, 
+  Building2,
   Settings,
+  BarChart3,
   ShieldCheck,
   X
 } from "lucide-react";
@@ -35,6 +37,8 @@ export default function Sidebar({
     { id: "transactions", label: "Transactions", icon: ArrowLeftRight },
     { id: "budgets", label: "Budgets", icon: Target },
     { id: "investments", label: "Investments", icon: Briefcase },
+    { id: "business", label: "Business", icon: Building2 },
+    { id: "reports", label: "Reports", icon: BarChart3 },
     { id: "settings", label: "Settings", icon: Settings },
   ];
 
