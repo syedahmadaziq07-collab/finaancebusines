@@ -119,17 +119,14 @@ export default function App() {
     // 3. Net worth is sum of all account balances
     const netWorthValue = accts.reduce((sum, a) => sum + a.balance, 0);
 
-    // 4. Savings = total available value (accounts + portfolio + goals + business profit)
+    // 4. Savings = total value of actual assets held (accounts + portfolio + goals)
+    //    Business profit is NOT added directly — it only shows in Business OS.
+    //    This avoids double counting if business profit is later moved to portfolio.
     const goalsSavedTotal = goals.reduce((sum, g) => sum + g.current, 0);
-    const businessRevenue = txs.filter(t => t.business_id && t.amount > 0).reduce((sum, t) => sum + t.amount, 0);
-    const businessExpenses = txs.filter(t => t.business_id && t.amount < 0).reduce((sum, t) => sum + Math.abs(t.amount), 0);
-    const businessNetProfit = businessRevenue - businessExpenses;
     let savingsValue: number;
     if (accts.length > 0) {
-      // accounts exist: use balance + portfolio + goals + business profit
-      savingsValue = netWorthValue + portfolioTotal + goalsSavedTotal + businessNetProfit;
+      savingsValue = netWorthValue + portfolioTotal + goalsSavedTotal;
     } else {
-      // no accounts: all transactions summed already includes business transactions
       const allIncome = txs.reduce((sum, t) => t.amount > 0 ? sum + t.amount : sum, 0);
       const allExpenses = txs.reduce((sum, t) => t.amount < 0 ? sum + Math.abs(t.amount) : sum, 0);
       savingsValue = Math.max(0, allIncome - allExpenses) + portfolioTotal + goalsSavedTotal;
@@ -157,7 +154,7 @@ export default function App() {
       savings: {
         value: savingsValue,
         changePercent: 0,
-        changeText: savingsValue > 0 ? "Total money + assets + business profit" : "No data yet"
+        changeText: savingsValue > 0 ? "Accounts + portfolio + goals" : "No data yet"
       }
     };
 
